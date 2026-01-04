@@ -1,4 +1,4 @@
-import org.gradle.kotlin.dsl.implementation
+import org.gradle.kotlin.dsl.api
 
 plugins {
     alias(libs.plugins.android.library)
@@ -20,5 +20,5 @@ android {
 }
 
 dependencies {
-    implementation("org.concentus:concentus:1.0.3")
+    api(files(rootProject.file("libs/opus.aar")))
 }
