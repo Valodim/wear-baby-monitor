@@ -4,39 +4,39 @@ import com.theeasiestway.opus.Constants
 import com.theeasiestway.opus.Opus
 
 class OpusEncoderWrapper {
-    private val frameSize = Constants.FrameSize.Companion.fromValue(
+    private val frameSize = Constants.FrameSize.fromValue(
         AudioCodecConfig.FRAME_SIZE_SAMPLES
     )
     private val opus = Opus().apply {
         encoderInit(
-            Constants.SampleRate.Companion._16000(),
-            Constants.Channels.Companion.mono(),
-            Constants.Application.Companion.voip()
+            Constants.SampleRate._16000(),
+            Constants.Channels.mono(),
+            Constants.Application.voip()
         )
-        encoderSetBitrate(Constants.Bitrate.Companion.instance(AudioCodecConfig.BITRATE_BPS))
+        encoderSetBitrate(Constants.Bitrate.instance(AudioCodecConfig.BITRATE_BPS))
     }
 
     fun encode(pcm: ShortArray): ByteArray {
         val encoded = opus.encode(pcm, frameSize)
-        return opus.convert(encoded)
+        return opus.convert(encoded!!)!!
     }
 }
 
 class OpusDecoderWrapper {
-    private val frameSize = Constants.FrameSize.Companion.fromValue(
+    private val frameSize = Constants.FrameSize.fromValue(
         AudioCodecConfig.FRAME_SIZE_SAMPLES
     )
     private val opus = Opus().apply {
         decoderInit(
-            Constants.SampleRate.Companion._16000(),
-            Constants.Channels.Companion.mono()
+            Constants.SampleRate._16000(),
+            Constants.Channels.mono()
         )
     }
 
     fun decode(encoded: ByteArray, output: ShortArray): Int {
         val decodedBytes = opus.decode(encoded, frameSize)
-        val decodedSamples = opus.convert(decodedBytes)
-        val samplesToCopy = decodedSamples.size.coerceAtMost(output.size)
+        val decodedSamples = opus.convert(decodedBytes!!)
+        val samplesToCopy = decodedSamples!!.size.coerceAtMost(output.size)
         decodedSamples.copyInto(output, endIndex = samplesToCopy)
         return samplesToCopy
     }
