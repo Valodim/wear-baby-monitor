@@ -36,17 +36,15 @@ import horse.amazin.babymonitor.shared.AudioStreamChannel
 import horse.amazin.babymonitor.shared.LoudnessData
 import java.io.IOException
 import java.io.OutputStream
-import kotlin.random.Random
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import kotlin.math.log10
 import kotlin.math.max
+import kotlin.math.sqrt
 
 class MainActivity : ComponentActivity() {
     private lateinit var dataClient: DataClient
     private lateinit var channelClient: ChannelClient
     private lateinit var nodeClient: NodeClient
-    private var lastSent by mutableStateOf<LoudnessReading?>(null)
+    private var currentLoudness by mutableStateOf<Float?>(null)
     private var isStreaming by mutableStateOf(false)
     private var streamStatus by mutableStateOf("Idle")
     private var currentChannel: ChannelClient.Channel? = null
@@ -93,19 +91,17 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    val loudnessText = if (!hasMicPermission) {
-                        "Microphone permission required."
-                    } else {
-                        val reading = lastSent
-                        if (reading == null) {
-                            "Waiting to send loudness..."
-                        } else {
-                            "Last sent: ${"%.1f".format(reading.db)} dB\n${reading.formattedTime}"
-                        }
-                    }
-                    val statusText = "Baby Monitor (Wear)\nAudio: $streamStatus\n$loudnessText"
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = statusText)
+                        Text(text = "Baby Monitor (Wear)")
+                        Text(
+                            text = if (!hasMicPermission) {
+                                "Mic permission required"
+                            } else {
+                                val loudness = currentLoudness
+                                "Current loudness: ${loudness?.let { "%.1f".format(it) } ?: "--"} dB"
+                            }
+                        )
+                        Text(text = "Stream: $streamStatus")
                         if (!hasMicPermission) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Button(onClick = {
@@ -122,7 +118,7 @@ class MainActivity : ComponentActivity() {
                                     startAudioStream()
                                 }
                             }) {
-                                Text(text = if (isStreaming) "Stop audio" else "Start audio")
+                                Text(text = if (isStreaming) "Stop streaming" else "Start streaming")
                             }
                         }
                     }
@@ -133,9 +129,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (hasMicPermission()) {
-            sendLoudnessSample()
-        }
+        currentLoudness = null
     }
 
     override fun onStop() {
@@ -148,22 +142,12 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun sendLoudnessSample() {
-        val db = Random.nextDouble(30.0, 80.0).toFloat()
-        val timestamp = System.currentTimeMillis()
+    private fun sendLoudnessSample(db: Float, timestamp: Long) {
         val request = PutDataMapRequest.create(LoudnessData.PATH).apply {
             dataMap.putFloat(LoudnessData.KEY_DB, db)
             dataMap.putLong(LoudnessData.KEY_TIMESTAMP, timestamp)
         }.asPutDataRequest().setUrgent()
         dataClient.putDataItem(request)
-        lastSent = LoudnessReading(db, formatTimestamp(timestamp))
-    }
-
-    private fun formatTimestamp(timestamp: Long): String {
-        val formatter = DateTimeFormatter.ofPattern("HH:mm:ss")
-        return Instant.ofEpochMilli(timestamp)
-            .atZone(ZoneId.systemDefault())
-            .format(formatter)
     }
 
     private fun hasMicPermission(): Boolean {
@@ -221,6 +205,7 @@ class MainActivity : ComponentActivity() {
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         val bufferSize = max(minBuffer, 2048)
+        var lastSentAt = 0L
         val recorder = AudioRecord(
             MediaRecorder.AudioSource.MIC,
             sampleRate,
@@ -242,6 +227,13 @@ class MainActivity : ComponentActivity() {
                 while (isStreaming) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
+                        val loudnessDb = calculateLoudnessDb(buffer, read)
+                        val now = System.currentTimeMillis()
+                        currentLoudness = loudnessDb
+                        if (now - lastSentAt >= 500L) {
+                            sendLoudnessSample(loudnessDb, now)
+                            lastSentAt = now
+                        }
                         stream.write(buffer, 0, read)
                         stream.flush()
                     }
@@ -266,6 +258,7 @@ class MainActivity : ComponentActivity() {
         isStreaming = false
         streamThread?.interrupt()
         streamThread = null
+        currentLoudness = null
         audioRecord?.run {
             try {
                 stop()
@@ -296,8 +289,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private data class LoudnessReading(
-        val db: Float,
-        val formattedTime: String
-    )
+    private fun calculateLoudnessDb(buffer: ByteArray, read: Int): Float {
+        var sumSquares = 0.0
+        var samples = 0
+        var i = 0
+        while (i + 1 < read) {
+            val sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xff)).toShort()
+            val normalized = sample / Short.MAX_VALUE.toDouble()
+            sumSquares += normalized * normalized
+            samples++
+            i += 2
+        }
+        if (samples == 0) return 0f
+        val rms = sqrt(sumSquares / samples)
+        val db = 20.0 * log10(rms.coerceAtLeast(1e-6))
+        return db.toFloat()
+    }
+
 }
