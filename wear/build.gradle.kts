@@ -9,7 +9,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "horse.amazin.babymonitor.wear"
+        applicationId = "horse.amazin.babymonitor"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
