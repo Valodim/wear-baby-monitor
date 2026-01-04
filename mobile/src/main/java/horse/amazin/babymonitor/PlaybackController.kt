@@ -6,6 +6,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import com.google.android.gms.wearable.ChannelClient
@@ -15,7 +16,9 @@ import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.NodeClient
 import com.google.android.gms.wearable.Wearable
 import horse.amazin.babymonitor.shared.AudioStreamChannel
+import horse.amazin.babymonitor.shared.AudioCodecConfig
 import horse.amazin.babymonitor.shared.LoudnessData
+import horse.amazin.babymonitor.shared.OpusDecoderWrapper
 import java.io.IOException
 import java.io.InputStream
 import kotlin.math.max
@@ -128,11 +131,11 @@ class PlaybackController(context: Context) {
     }
 
     private fun startPlayback(stream: InputStream) {
-        val sampleRate = AudioStreamChannel.SAMPLE_RATE
+        val sampleRate = AudioCodecConfig.SAMPLE_RATE
         val channelConfig = AudioFormat.CHANNEL_OUT_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val minBuffer = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-        val bufferSize = max(minBuffer, 2048)
+        val bufferSize = max(minBuffer, AudioCodecConfig.FRAME_SIZE_SAMPLES * 2)
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -154,15 +157,42 @@ class PlaybackController(context: Context) {
         track.play()
         updatePlaybackStatus("Playing audio")
         playbackThread = Thread {
-            val buffer = ByteArray(bufferSize)
+            val decoder = OpusDecoderWrapper()
+            val header = ByteArray(4)
+            val decodedBuffer = ShortArray(AudioCodecConfig.FRAME_SIZE_SAMPLES)
+            var totalBytesReceived = 0L
+            var totalFramesDecoded = 0L
+            var lastStatsAt = System.currentTimeMillis()
             try {
                 while (playbackActive) {
-                    val read = stream.read(buffer)
-                    if (read == -1) {
+                    if (!readFully(stream, header, header.size)) {
                         break
                     }
-                    if (read > 0) {
-                        track.write(buffer, 0, read)
+                    val frameSize = parseFrameLength(header)
+                    if (frameSize <= 0 || frameSize > AudioCodecConfig.MAX_PACKET_SIZE) {
+                        updatePlaybackStatus("Invalid frame size: $frameSize")
+                        break
+                    }
+                    val encodedFrame = ByteArray(frameSize)
+                    if (!readFully(stream, encodedFrame, encodedFrame.size)) {
+                        break
+                    }
+                    val decodedSamples = decoder.decode(encodedFrame, decodedBuffer)
+                    track.write(decodedBuffer, 0, decodedSamples)
+                    totalBytesReceived += frameSize + header.size
+                    totalFramesDecoded += 1
+                    val now = System.currentTimeMillis()
+                    if (now - lastStatsAt >= 5000L) {
+                        val elapsedSeconds = (now - lastStatsAt) / 1000.0
+                        val bitrate = (totalBytesReceived * 8) / elapsedSeconds
+                        Log.i(
+                            "PlaybackController",
+                            "Received $totalFramesDecoded frames, $totalBytesReceived bytes " +
+                                "(${bitrate.toInt()} bps)"
+                        )
+                        totalBytesReceived = 0
+                        totalFramesDecoded = 0
+                        lastStatsAt = now
                     }
                 }
             } catch (error: IOException) {
@@ -218,5 +248,24 @@ class PlaybackController(context: Context) {
         mainHandler.post {
             _playbackStatus.value = message
         }
+    }
+
+    private fun readFully(stream: InputStream, buffer: ByteArray, length: Int): Boolean {
+        var offset = 0
+        while (offset < length) {
+            val read = stream.read(buffer, offset, length - offset)
+            if (read == -1) {
+                return false
+            }
+            offset += read
+        }
+        return true
+    }
+
+    private fun parseFrameLength(header: ByteArray): Int {
+        return ((header[0].toInt() and 0xff) shl 24) or
+            ((header[1].toInt() and 0xff) shl 16) or
+            ((header[2].toInt() and 0xff) shl 8) or
+            (header[3].toInt() and 0xff)
     }
 }
