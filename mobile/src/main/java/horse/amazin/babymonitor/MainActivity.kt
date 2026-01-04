@@ -30,9 +30,6 @@ import horse.amazin.babymonitor.shared.AudioStreamChannel
 import horse.amazin.babymonitor.shared.LoudnessData
 import java.io.IOException
 import java.io.InputStream
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.math.max
 
 class MainActivity : ComponentActivity() {
@@ -52,8 +49,7 @@ class MainActivity : ComponentActivity() {
             if (event.type == DataEvent.TYPE_CHANGED && event.dataItem.uri.path == LoudnessData.PATH) {
                 val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
                 val db = dataMap.getFloat(LoudnessData.KEY_DB)
-                val timestamp = dataMap.getLong(LoudnessData.KEY_TIMESTAMP)
-                lastReceived = LoudnessReading(db, formatTimestamp(timestamp))
+                lastReceived = LoudnessReading(db)
             }
         }
     }
@@ -84,14 +80,16 @@ class MainActivity : ComponentActivity() {
                     contentAlignment = Alignment.Center
                 ) {
                     val reading = lastReceived
-                    val loudnessText = if (reading == null) {
-                        "Waiting for loudness..."
-                    } else {
-                        "Loudness: ${"%.1f".format(reading.db)} dB\n${reading.formattedTime}"
-                    }
-                    val statusText = "Baby Monitor (Phone)\nAudio: $playbackStatus\n$loudnessText"
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = statusText)
+                        Text(text = "Baby Monitor (Phone)")
+                        Text(
+                            text = if (reading == null) {
+                                "Received loudness: -- dB"
+                            } else {
+                                "Received loudness: ${"%.1f".format(reading.db)} dB"
+                            }
+                        )
+                        Text(text = "Stream: $playbackStatus")
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(onClick = {
                             if (isPlaying) {
@@ -100,7 +98,7 @@ class MainActivity : ComponentActivity() {
                                 startAudioPlayback()
                             }
                         }) {
-                            Text(text = if (isPlaying) "Stop audio" else "Start audio")
+                            Text(text = if (isPlaying) "Stop listening" else "Start listening")
                         }
                     }
                 }
@@ -250,15 +248,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun formatTimestamp(timestamp: Long): String {
-        val formatter = DateTimeFormatter.ofPattern("HH:mm:ss")
-        return Instant.ofEpochMilli(timestamp)
-            .atZone(ZoneId.systemDefault())
-            .format(formatter)
-    }
-
     private data class LoudnessReading(
-        val db: Float,
-        val formattedTime: String
+        val db: Float
     )
 }
