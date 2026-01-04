@@ -4,13 +4,16 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.DataClient
 import com.google.android.gms.wearable.NodeClient
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import horse.amazin.babymonitor.shared.AudioStreamChannel
+import horse.amazin.babymonitor.shared.AudioCodecConfig
 import horse.amazin.babymonitor.shared.LoudnessData
+import horse.amazin.babymonitor.shared.OpusEncoderWrapper
 import java.io.IOException
 import java.io.OutputStream
 import kotlin.math.log10
@@ -114,11 +117,11 @@ class AudioStreamController(context: Context) {
     }
 
     private fun startRecording(stream: OutputStream) {
-        val sampleRate = AudioStreamChannel.SAMPLE_RATE
+        val sampleRate = AudioCodecConfig.SAMPLE_RATE
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-        val bufferSize = max(minBuffer, 2048)
+        val bufferSize = max(minBuffer, AudioCodecConfig.FRAME_SIZE_SAMPLES * 2)
         var lastSentAt = 0L
         val recorder = AudioRecord(
             MediaRecorder.AudioSource.MIC,
@@ -136,20 +139,43 @@ class AudioStreamController(context: Context) {
         recorder.startRecording()
         updateStreamStatus("Streaming audio")
         streamThread = Thread {
-            val buffer = ByteArray(bufferSize)
+            val encoder = OpusEncoderWrapper()
+            val pcmBuffer = ShortArray(AudioCodecConfig.FRAME_SIZE_SAMPLES)
+            val header = ByteArray(4)
+            var totalBytesSent = 0L
+            var totalFramesSent = 0L
+            var lastStatsAt = System.currentTimeMillis()
             try {
                 while (streaming) {
-                    val read = recorder.read(buffer, 0, buffer.size)
+                    val read = recorder.read(pcmBuffer, 0, pcmBuffer.size)
                     if (read > 0) {
-                        val loudnessDb = calculateLoudnessDb(buffer, read)
+                        if (read < pcmBuffer.size) {
+                            pcmBuffer.fill(0, read, pcmBuffer.size)
+                        }
+                        val loudnessDb = calculateLoudnessDb(pcmBuffer, read)
                         val now = System.currentTimeMillis()
                         _currentLoudness.value = loudnessDb
                         if (now - lastSentAt >= 500L) {
                             sendLoudnessSample(loudnessDb, now)
                             lastSentAt = now
                         }
-                        stream.write(buffer, 0, read)
+                        val encoded = encoder.encode(pcmBuffer)
+                        writeFrame(stream, header, encoded)
+                        totalBytesSent += encoded.size + header.size
+                        totalFramesSent += 1
                         stream.flush()
+                        if (now - lastStatsAt >= 5000L) {
+                            val elapsedSeconds = (now - lastStatsAt) / 1000.0
+                            val bitrate = (totalBytesSent * 8) / elapsedSeconds
+                            Log.i(
+                                "AudioStreamController",
+                                "Sent $totalFramesSent frames, ${totalBytesSent} bytes " +
+                                    "(${bitrate.toInt()} bps)"
+                            )
+                            totalBytesSent = 0
+                            totalFramesSent = 0
+                            lastStatsAt = now
+                        }
                     }
                 }
             } catch (error: IOException) {
@@ -202,20 +228,30 @@ class AudioStreamController(context: Context) {
         dataClient.putDataItem(request)
     }
 
-    private fun calculateLoudnessDb(buffer: ByteArray, read: Int): Float {
+    private fun calculateLoudnessDb(buffer: ShortArray, read: Int): Float {
         var sumSquares = 0.0
         var samples = 0
         var i = 0
-        while (i + 1 < read) {
-            val sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xff)).toShort()
+        while (i < read) {
+            val sample = buffer[i]
             val normalized = sample / Short.MAX_VALUE.toDouble()
             sumSquares += normalized * normalized
             samples++
-            i += 2
+            i += 1
         }
         if (samples == 0) return 0f
         val rms = sqrt(sumSquares / samples)
         val db = 20.0 * log10(rms.coerceAtLeast(1e-6))
         return db.toFloat()
+    }
+
+    private fun writeFrame(stream: OutputStream, header: ByteArray, payload: ByteArray) {
+        val length = payload.size
+        header[0] = (length ushr 24).toByte()
+        header[1] = (length ushr 16).toByte()
+        header[2] = (length ushr 8).toByte()
+        header[3] = length.toByte()
+        stream.write(header)
+        stream.write(payload)
     }
 }

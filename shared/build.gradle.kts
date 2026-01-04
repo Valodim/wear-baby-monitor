@@ -15,3 +15,7 @@ android {
         jvmTarget = "17"
     }
 }
+
+dependencies {
+    implementation("org.concentus:concentus:1.0.3")
+}
