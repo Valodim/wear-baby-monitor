@@ -1,54 +1,43 @@
 package horse.amazin.babymonitor.shared
 
-import org.concentus.OpusApplication
-import org.concentus.OpusDecoder
-import org.concentus.OpusEncoder
+import com.theeasiestway.opus.Constants
+import com.theeasiestway.opus.Opus
 
-/**
- * Opus codec wrapper backed by Concentus (BSD-3-Clause), a pure Java Opus port.
- * This avoids JNI on Wear OS and keeps CPU usage modest for 16 kHz mono speech frames.
- */
 class OpusEncoderWrapper {
-    private val encoder = OpusEncoder(
-        AudioCodecConfig.SAMPLE_RATE,
-        AudioCodecConfig.CHANNELS,
-        OpusApplication.OPUS_APPLICATION_VOIP
-    ).apply {
-        bitrate = AudioCodecConfig.BITRATE_BPS
+    private val frameSize = Constants.FrameSize.Companion.fromValue(
+        AudioCodecConfig.FRAME_SIZE_SAMPLES
+    )
+    private val opus = Opus().apply {
+        encoderInit(
+            Constants.SampleRate.Companion._16000(),
+            Constants.Channels.Companion.mono(),
+            Constants.Application.Companion.voip()
+        )
+        encoderSetBitrate(Constants.Bitrate.Companion.instance(AudioCodecConfig.BITRATE_BPS))
     }
 
     fun encode(pcm: ShortArray): ByteArray {
-        val output = ByteArray(AudioCodecConfig.MAX_PACKET_SIZE)
-        val encodedSize = encoder.encode(
-            pcm,
-            0,
-            AudioCodecConfig.FRAME_SIZE_SAMPLES,
-            output,
-            0,
-            output.size
-        )
-        require(encodedSize > 0) { "Opus encoding failed with code $encodedSize" }
-        return output.copyOf(encodedSize)
+        val encoded = opus.encode(pcm, frameSize)
+        return opus.convert(encoded)
     }
 }
 
 class OpusDecoderWrapper {
-    private val decoder = OpusDecoder(
-        AudioCodecConfig.SAMPLE_RATE,
-        AudioCodecConfig.CHANNELS
+    private val frameSize = Constants.FrameSize.Companion.fromValue(
+        AudioCodecConfig.FRAME_SIZE_SAMPLES
     )
+    private val opus = Opus().apply {
+        decoderInit(
+            Constants.SampleRate.Companion._16000(),
+            Constants.Channels.Companion.mono()
+        )
+    }
 
     fun decode(encoded: ByteArray, output: ShortArray): Int {
-        val decodedSamples = decoder.decode(
-            encoded,
-            0,
-            encoded.size,
-            output,
-            0,
-            output.size,
-            false
-        )
-        require(decodedSamples > 0) { "Opus decoding failed with code $decodedSamples" }
-        return decodedSamples
+        val decodedBytes = opus.decode(encoded, frameSize)
+        val decodedSamples = opus.convert(decodedBytes)
+        val samplesToCopy = decodedSamples.size.coerceAtMost(output.size)
+        decodedSamples.copyInto(output, endIndex = samplesToCopy)
+        return samplesToCopy
     }
 }
