@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.util.Log
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.DataClient
@@ -24,6 +25,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class AudioStreamController(context: Context) {
+    private val attributedContext =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            context.createAttributionContext(ATTRIBUTION_TAG)
+        } else {
+            context
+        }
     private val dataClient: DataClient = Wearable.getDataClient(context)
     private val channelClient: ChannelClient = Wearable.getChannelClient(context)
     private val nodeClient: NodeClient = Wearable.getNodeClient(context)
@@ -123,13 +130,20 @@ class AudioStreamController(context: Context) {
         val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         val bufferSize = max(minBuffer, AudioCodecConfig.FRAME_SIZE_SAMPLES * 2)
         var lastSentAt = 0L
-        val recorder = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            sampleRate,
-            channelConfig,
-            audioFormat,
-            bufferSize
-        )
+        val recorderBuilder = AudioRecord.Builder()
+            .setAudioSource(MediaRecorder.AudioSource.MIC)
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(audioFormat)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(channelConfig)
+                    .build()
+            )
+            .setBufferSizeInBytes(bufferSize)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            recorderBuilder.setContext(attributedContext)
+        }
+        val recorder = recorderBuilder.build()
         if (recorder.state != AudioRecord.STATE_INITIALIZED) {
             updateStreamStatus("AudioRecord init failed")
             stopStreamingInternal()
@@ -253,5 +267,9 @@ class AudioStreamController(context: Context) {
         header[3] = length.toByte()
         stream.write(header)
         stream.write(payload)
+    }
+
+    private companion object {
+        private const val ATTRIBUTION_TAG = "audio_monitoring"
     }
 }
