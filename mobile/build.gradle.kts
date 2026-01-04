@@ -22,10 +22,6 @@ android {
         compose = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
