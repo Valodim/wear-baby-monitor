@@ -42,9 +42,12 @@ class AudioStreamController(val context: Context) {
 
     private var currentChannel: ChannelClient.Channel? = null
     private var streamThread: Thread? = null
+    private var monitorThread: Thread? = null
 
     @Volatile
     private var streaming = false
+    @Volatile
+    private var monitoring = false
 
     private val channelCallback = object : ChannelClient.ChannelCallback() {
         override fun onChannelClosed(
@@ -111,6 +114,77 @@ class AudioStreamController(val context: Context) {
         stopStreamingInternal()
         _currentLoudness.value = null
         updateStreamStatus("Idle")
+    }
+
+    fun startMonitoring() {
+        if (monitoring) {
+            return
+        }
+        monitoring = true
+        monitorThread = Thread {
+            val sampleRate = AudioCodecConfig.SAMPLE_RATE
+            val channelConfig = AudioFormat.CHANNEL_IN_MONO
+            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+            val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+            val bufferSize = max(minBuffer, AudioCodecConfig.FRAME_SIZE_SAMPLES * 2)
+            val pcmBuffer = ShortArray(AudioCodecConfig.FRAME_SIZE_SAMPLES)
+            var recorder: AudioRecord? = null
+            try {
+                while (monitoring) {
+                    if (ActivityCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        Thread.sleep(1000)
+                        continue
+                    }
+                    if (recorder == null) {
+                        recorder = AudioRecord(
+                            MediaRecorder.AudioSource.MIC,
+                            sampleRate,
+                            channelConfig,
+                            audioFormat,
+                            bufferSize
+                        )
+                        if (recorder?.state != AudioRecord.STATE_INITIALIZED) {
+                            recorder?.release()
+                            recorder = null
+                            Thread.sleep(500)
+                            continue
+                        }
+                        recorder?.startRecording()
+                    }
+                    val read = recorder?.read(pcmBuffer, 0, pcmBuffer.size) ?: 0
+                    if (read > 0) {
+                        if (read < pcmBuffer.size) {
+                            pcmBuffer.fill(0, read, pcmBuffer.size)
+                        }
+                        val loudnessDb = calculateLoudnessDb(pcmBuffer, read)
+                        _currentLoudness.value = loudnessDb
+                    } else {
+                        Thread.sleep(50)
+                    }
+                }
+            } catch (_: InterruptedException) {
+                // Stop requested.
+            } finally {
+                recorder?.let {
+                    try {
+                        it.stop()
+                    } catch (_: IllegalStateException) {
+                        // Ignore stop errors when recorder is not active.
+                    }
+                    it.release()
+                }
+            }
+        }.also { it.start() }
+    }
+
+    fun stopMonitoring() {
+        monitoring = false
+        monitorThread?.interrupt()
+        monitorThread = null
     }
 
     private fun startRecording(stream: OutputStream) {
