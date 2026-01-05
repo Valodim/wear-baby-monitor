@@ -14,6 +14,11 @@ object AudioMonitorServiceState {
     private val _currentLoudness = MutableStateFlow<Float?>(null)
     val currentLoudness: StateFlow<Float?> = _currentLoudness.asStateFlow()
 
+    private val _autoStreamConfig =
+        MutableStateFlow<horse.amazin.babymonitor.shared.AutoStreamConfig?>(null)
+    val autoStreamConfig: StateFlow<horse.amazin.babymonitor.shared.AutoStreamConfig?> =
+        _autoStreamConfig.asStateFlow()
+
     fun updateStreamStatus(status: String) {
         _streamStatus.value = status
     }
@@ -24,6 +29,10 @@ object AudioMonitorServiceState {
 
     fun updateLoudness(loudness: Float?) {
         _currentLoudness.value = loudness
+    }
+
+    fun updateAutoStreamConfig(config: horse.amazin.babymonitor.shared.AutoStreamConfig?) {
+        _autoStreamConfig.value = config
     }
 
 }
