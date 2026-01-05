@@ -68,14 +68,11 @@ class AudioStreamController(val context: Context) {
         stopStreamingInternal()
     }
 
-    fun resetLoudness() {
-        _currentLoudness.value = null
-    }
-
     fun startStreaming() {
         if (streaming) {
             return
         }
+        _currentLoudness.value = null
         streaming = true
         _isStreaming.value = true
         updateStreamStatus("Connecting...")
@@ -112,6 +109,7 @@ class AudioStreamController(val context: Context) {
 
     fun stopStreaming() {
         stopStreamingInternal()
+        _currentLoudness.value = null
         updateStreamStatus("Idle")
     }
 

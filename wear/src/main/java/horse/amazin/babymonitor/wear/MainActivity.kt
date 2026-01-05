@@ -1,6 +1,7 @@
 package horse.amazin.babymonitor.wear
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -27,12 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
-    private lateinit var audioStreamController: AudioStreamController
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        audioStreamController = AudioStreamController(applicationContext)
-        audioStreamController.start()
         setContent {
             MaterialTheme {
                 val context = LocalContext.current
@@ -44,9 +41,9 @@ class MainActivity : ComponentActivity() {
                         ) == PackageManager.PERMISSION_GRANTED
                     )
                 }
-                val currentLoudness by audioStreamController.currentLoudness.collectAsState()
-                val streamStatus by audioStreamController.streamStatus.collectAsState()
-                val isStreaming by audioStreamController.isStreaming.collectAsState()
+                val currentLoudness by AudioMonitorServiceState.currentLoudness.collectAsState()
+                val streamStatus by AudioMonitorServiceState.streamStatus.collectAsState()
+                val isStreaming by AudioMonitorServiceState.isStreaming.collectAsState()
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { granted ->
@@ -76,11 +73,15 @@ class MainActivity : ComponentActivity() {
                         } else {
                             Spacer(modifier = Modifier.height(8.dp))
                             Button(onClick = {
-                                if (isStreaming) {
-                                    audioStreamController.stopStreaming()
+                                val action = if (isStreaming) {
+                                    AudioMonitorService.ACTION_STOP_STREAM
                                 } else {
-                                    audioStreamController.startStreaming()
+                                    AudioMonitorService.ACTION_START_STREAM
                                 }
+                                val intent = Intent(context, AudioMonitorService::class.java).apply {
+                                    this.action = action
+                                }
+                                ContextCompat.startForegroundService(context, intent)
                             }) {
                                 Text(text = if (isStreaming) "Stop streaming" else "Start streaming")
                             }
@@ -91,18 +92,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-        audioStreamController.resetLoudness()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        audioStreamController.stopStreaming()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        audioStreamController.stop()
-    }
 }
