@@ -20,6 +20,10 @@ class OpusEncoderWrapper {
         val encoded = opus.encode(pcm, frameSize)
         return opus.convert(encoded!!)!!
     }
+
+    fun close() {
+        opus.encoderRelease()
+    }
 }
 
 class OpusDecoderWrapper {
@@ -39,5 +43,9 @@ class OpusDecoderWrapper {
         val samplesToCopy = decodedSamples!!.size.coerceAtMost(output.size)
         decodedSamples.copyInto(output, endIndex = samplesToCopy)
         return samplesToCopy
+    }
+
+    fun close() {
+        opus.decoderRelease()
     }
 }

@@ -1,29 +1,32 @@
 package horse.amazin.babymonitor.wear
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
+import androidx.core.app.ActivityCompat
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.DataClient
 import com.google.android.gms.wearable.NodeClient
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
-import horse.amazin.babymonitor.shared.AudioStreamChannel
 import horse.amazin.babymonitor.shared.AudioCodecConfig
+import horse.amazin.babymonitor.shared.AudioStreamChannel
 import horse.amazin.babymonitor.shared.LoudnessData
 import horse.amazin.babymonitor.shared.OpusEncoderWrapper
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.IOException
 import java.io.OutputStream
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.sqrt
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
-class AudioStreamController(context: Context) {
+class AudioStreamController(val context: Context) {
     private val dataClient: DataClient = Wearable.getDataClient(context)
     private val channelClient: ChannelClient = Wearable.getChannelClient(context)
     private val nodeClient: NodeClient = Wearable.getNodeClient(context)
@@ -38,8 +41,6 @@ class AudioStreamController(context: Context) {
     val currentLoudness: StateFlow<Float?> = _currentLoudness.asStateFlow()
 
     private var currentChannel: ChannelClient.Channel? = null
-    private var outputStream: OutputStream? = null
-    private var audioRecord: AudioRecord? = null
     private var streamThread: Thread? = null
 
     @Volatile
@@ -91,7 +92,6 @@ class AudioStreamController(context: Context) {
                         currentChannel = channel
                         channelClient.getOutputStream(channel)
                             .addOnSuccessListener { stream ->
-                                outputStream = stream
                                 startRecording(stream)
                             }
                             .addOnFailureListener { error ->
@@ -111,12 +111,18 @@ class AudioStreamController(context: Context) {
     }
 
     fun stopStreaming() {
-        updateStreamStatus(if (streaming) "Stopping..." else "Idle")
         stopStreamingInternal()
         updateStreamStatus("Idle")
     }
 
     private fun startRecording(stream: OutputStream) {
+        if (ActivityCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+
         val sampleRate = AudioCodecConfig.SAMPLE_RATE
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
@@ -135,7 +141,6 @@ class AudioStreamController(context: Context) {
             stopStreamingInternal()
             return
         }
-        audioRecord = recorder
         recorder.startRecording()
         updateStreamStatus("Streaming audio")
         streamThread = Thread {
@@ -163,7 +168,6 @@ class AudioStreamController(context: Context) {
                         writeFrame(stream, header, encoded)
                         totalBytesSent += encoded.size + header.size
                         totalFramesSent += 1
-                        stream.flush()
                         if (now - lastStatsAt >= 5000L) {
                             val elapsedSeconds = (now - lastStatsAt) / 1000.0
                             val bitrate = (totalBytesSent * 8) / elapsedSeconds
@@ -181,7 +185,19 @@ class AudioStreamController(context: Context) {
             } catch (error: IOException) {
                 updateStreamStatus("Stream error: ${error.message}")
             } finally {
+                try {
+                    recorder.stop()
+                } catch (_: IllegalStateException) {
+                    // Ignore stop errors when recorder is not active.
+                }
+                recorder.release()
+                try {
+                    stream.close()
+                } catch (_: IOException) {
+                    // Ignore close errors.
+                }
                 stopStreamingInternal()
+                encoder.close()
             }
         }.also { it.start() }
     }
@@ -192,23 +208,6 @@ class AudioStreamController(context: Context) {
         streamThread?.interrupt()
         streamThread = null
         _currentLoudness.value = null
-        audioRecord?.run {
-            try {
-                stop()
-            } catch (_: IllegalStateException) {
-                // Ignore stop errors when recorder is not active.
-            }
-            release()
-        }
-        audioRecord = null
-        outputStream?.run {
-            try {
-                close()
-            } catch (_: IOException) {
-                // Ignore close errors.
-            }
-        }
-        outputStream = null
         val channel = currentChannel
         currentChannel = null
         if (channel != null) {
@@ -253,5 +252,6 @@ class AudioStreamController(context: Context) {
         header[3] = length.toByte()
         stream.write(header)
         stream.write(payload)
+        stream.flush()
     }
 }

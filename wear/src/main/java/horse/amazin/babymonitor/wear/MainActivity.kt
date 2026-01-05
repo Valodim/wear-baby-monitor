@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        audioStreamController = AudioStreamController(this)
+        audioStreamController = AudioStreamController(applicationContext)
         audioStreamController.start()
         setContent {
             MaterialTheme {
@@ -97,12 +97,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        audioStreamController.stopStreaming()
         super.onStop()
+        audioStreamController.stopStreaming()
     }
 
     override fun onDestroy() {
-        audioStreamController.stop()
         super.onDestroy()
+        audioStreamController.stop()
     }
 }

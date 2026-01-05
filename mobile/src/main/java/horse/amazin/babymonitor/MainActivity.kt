@@ -41,16 +41,6 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         Text(text = "Stream: $playbackStatus")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(onClick = {
-                            if (isPlaying) {
-                                playbackController.stopAudioPlayback()
-                            } else {
-                                playbackController.startAudioPlayback()
-                            }
-                        }) {
-                            Text(text = if (isPlaying) "Stop listening" else "Start listening")
-                        }
                     }
                 }
             }
@@ -63,12 +53,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        playbackController.onStop()
         super.onStop()
-    }
-
-    override fun onDestroy() {
-        playbackController.onDestroy()
-        super.onDestroy()
+        playbackController.onStop()
     }
 }
