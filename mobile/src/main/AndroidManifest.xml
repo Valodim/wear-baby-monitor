@@ -1,11 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <attribution
-        android:tag="audio_monitoring"
-        android:label="@string/attribution_audio_monitoring" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
-        android:attributionTag="audio_monitoring"
         android:label="Baby Monitor"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity

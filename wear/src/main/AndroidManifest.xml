@@ -1,14 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <attribution
-        android:tag="audio_monitoring"
-        android:label="@string/attribution_audio_monitoring" />
     <uses-feature android:name="android.hardware.type.watch" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <application
-        android:attributionTag="audio_monitoring"
         android:label="Baby Monitor"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <service

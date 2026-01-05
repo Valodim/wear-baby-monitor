@@ -4,7 +4,6 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -25,12 +24,6 @@ import java.io.InputStream
 import kotlin.math.max
 
 class PlaybackController(context: Context) {
-    private val attributedContext =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            context.createAttributionContext(ATTRIBUTION_TAG)
-        } else {
-            context
-        }
     private val dataClient: DataClient = Wearable.getDataClient(context)
     private val channelClient: ChannelClient = Wearable.getChannelClient(context)
     private val nodeClient: NodeClient = Wearable.getNodeClient(context)
@@ -143,7 +136,7 @@ class PlaybackController(context: Context) {
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val minBuffer = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         val bufferSize = max(minBuffer, AudioCodecConfig.FRAME_SIZE_SAMPLES * 2)
-        val trackBuilder = AudioTrack.Builder()
+        val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -159,10 +152,7 @@ class PlaybackController(context: Context) {
             )
             .setBufferSizeInBytes(bufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            trackBuilder.setContext(attributedContext)
-        }
-        val track = trackBuilder.build()
+            .build()
         audioTrack = track
         track.play()
         updatePlaybackStatus("Playing audio")
@@ -277,9 +267,5 @@ class PlaybackController(context: Context) {
             ((header[1].toInt() and 0xff) shl 16) or
             ((header[2].toInt() and 0xff) shl 8) or
             (header[3].toInt() and 0xff)
-    }
-
-    private companion object {
-        private const val ATTRIBUTION_TAG = "audio_monitoring"
     }
 }
