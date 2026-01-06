@@ -17,15 +17,18 @@ import kotlinx.coroutines.launch
 
 class PlaybackService : Service() {
     private lateinit var playbackController: PlaybackController
+    private lateinit var loudnessReceiver: LoudnessReceiver
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
         super.onCreate()
-        playbackController = PlaybackController(this)
+        playbackController = PlaybackController(applicationContext)
+        loudnessReceiver = LoudnessReceiver(applicationContext)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         collectPlaybackState()
-        playbackController.onStart()
+        playbackController.init()
+        loudnessReceiver.init()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -36,7 +39,8 @@ class PlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        playbackController.onStop()
+        playbackController.close()
+        loudnessReceiver.close()
         stopForeground(STOP_FOREGROUND_REMOVE)
         serviceScope.cancel()
         super.onDestroy()
@@ -66,7 +70,7 @@ class PlaybackService : Service() {
 
     private fun collectPlaybackState() {
         serviceScope.launch {
-            playbackController.lastReceived.collect { lastReceived.value = it }
+            loudnessReceiver.lastReceived.collect { lastReceived.value = it }
         }
         serviceScope.launch {
             playbackController.playbackStatus.collect { playbackStatus.value = it }

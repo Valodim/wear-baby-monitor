@@ -8,29 +8,21 @@ import android.media.audiofx.LoudnessEnhancer
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.google.android.gms.wearable.ChannelClient
+import com.google.android.gms.wearable.Wearable
+import horse.amazin.babymonitor.shared.AudioCodecConfig
+import horse.amazin.babymonitor.shared.OpusDecoderWrapper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import com.google.android.gms.wearable.ChannelClient
-import com.google.android.gms.wearable.DataClient
-import com.google.android.gms.wearable.DataEvent
-import com.google.android.gms.wearable.DataMapItem
-import com.google.android.gms.wearable.Wearable
-import horse.amazin.babymonitor.shared.AudioCodecConfig
-import horse.amazin.babymonitor.shared.LoudnessData
-import horse.amazin.babymonitor.shared.OpusDecoderWrapper
 import java.io.IOException
 import java.io.InputStream
 import kotlin.math.max
 
 
 class PlaybackController(context: Context) {
-    private val dataClient: DataClient = Wearable.getDataClient(context)
     private val channelClient: ChannelClient = Wearable.getChannelClient(context)
     private val mainHandler = Handler(Looper.getMainLooper())
-
-    private val _lastReceived = MutableStateFlow<Float?>(null)
-    val lastReceived: StateFlow<Float?> = _lastReceived.asStateFlow()
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -42,16 +34,6 @@ class PlaybackController(context: Context) {
     private var playbackActive = false
     private var currentChannel: ChannelClient.Channel? = null
     private var playbackThread: Thread? = null
-
-    private val loudnessListener = DataClient.OnDataChangedListener { dataEvents ->
-        dataEvents.forEach { event ->
-            if (event.type == DataEvent.TYPE_CHANGED && event.dataItem.uri.path == LoudnessData.PATH) {
-                val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
-                val db = dataMap.getFloat(LoudnessData.KEY_DB)
-                updateLastReceived(db)
-            }
-        }
-    }
 
     private val channelCallback = object : ChannelClient.ChannelCallback() {
         override fun onChannelOpened(channel: ChannelClient.Channel) {
@@ -78,13 +60,11 @@ class PlaybackController(context: Context) {
         }
     }
 
-    fun onStart() {
+    fun init() {
         channelClient.registerChannelCallback(channelCallback)
-        dataClient.addListener(loudnessListener)
     }
 
-    fun onStop() {
-        dataClient.removeListener(loudnessListener)
+    fun close() {
         channelClient.unregisterChannelCallback(channelCallback)
         stopAudioPlaybackInternal()
     }
@@ -198,12 +178,6 @@ class PlaybackController(context: Context) {
         currentChannel = null
         if (channel != null) {
             channelClient.close(channel)
-        }
-    }
-
-    private fun updateLastReceived(value: Float) {
-        mainHandler.post {
-            _lastReceived.value = value
         }
     }
 
