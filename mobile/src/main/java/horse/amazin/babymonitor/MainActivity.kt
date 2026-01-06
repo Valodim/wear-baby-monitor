@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    val lastReceived by BabyMonitorService.lastReceived.sample(500).collectAsState(initial = null)
+                    val lastReceived by BabyMonitorService.lastReceived.collectAsState(initial = null)
                     val playbackStatus by BabyMonitorService.playbackStatus.collectAsState(initial = "Idle")
                     val isServiceActive by BabyMonitorService.isActive.collectAsState(false)
                     var thresholdText by rememberSaveable { mutableStateOf("-75.0") }
