@@ -1,6 +1,7 @@
 package horse.amazin.babymonitor
 
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -11,12 +12,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -25,14 +29,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-
 class MainActivity : ComponentActivity() {
-    private lateinit var playbackController: PlaybackController
     private lateinit var autoStreamConfigSender: AutoStreamConfigSender
+    private val playbackServiceRunning = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        playbackController = PlaybackController(this)
         autoStreamConfigSender = AutoStreamConfigSender(this)
         setContent {
             MaterialTheme {
@@ -40,8 +42,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    val lastReceived by playbackController.lastReceived
-                    val playbackStatus by playbackController.playbackStatus
+                    val lastReceived by PlaybackService.lastReceived.collectAsState(initial = null)
+                    val playbackStatus by PlaybackService.playbackStatus.collectAsState(initial = "Idle")
+                    val isServiceRunning by playbackServiceRunning
                     var thresholdText by rememberSaveable { mutableStateOf("-35.0") }
                     var durationText by rememberSaveable { mutableStateOf("500") }
                     var autoStreamEnabled by rememberSaveable { mutableStateOf(true) }
@@ -69,6 +72,28 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         Text(text = "Stream: $playbackStatus")
+                        Text(text = "Service: ${if (isServiceRunning) "Running" else "Stopped"}")
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(0.85f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Button(
+                                onClick = { startPlaybackService() },
+                                enabled = !isServiceRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Start Service")
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = { stopPlaybackService() },
+                                enabled = isServiceRunning,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Stop Service")
+                            }
+                        }
                         Spacer(modifier = Modifier.height(24.dp))
                         Text(text = "Auto-Stream Settings")
                         Spacer(modifier = Modifier.height(12.dp))
@@ -111,11 +136,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        playbackController.onStart()
+        startPlaybackService()
     }
 
     override fun onStop() {
         super.onStop()
-        playbackController.onStop()
+    }
+
+    private fun startPlaybackService() {
+        val intent = Intent(this, PlaybackService::class.java)
+        startService(intent)
+        playbackServiceRunning.value = true
+    }
+
+    private fun stopPlaybackService() {
+        val intent = Intent(this, PlaybackService::class.java)
+        stopService(intent)
+        playbackServiceRunning.value = false
     }
 }
