@@ -8,8 +8,9 @@ import android.media.audiofx.LoudnessEnhancer
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.DataClient
 import com.google.android.gms.wearable.DataEvent
@@ -28,14 +29,14 @@ class PlaybackController(context: Context) {
     private val channelClient: ChannelClient = Wearable.getChannelClient(context)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val _lastReceived = mutableStateOf<Float?>(null)
-    val lastReceived: State<Float?> = _lastReceived
+    private val _lastReceived = MutableStateFlow<Float?>(null)
+    val lastReceived: StateFlow<Float?> = _lastReceived.asStateFlow()
 
-    private val _isPlaying = mutableStateOf(false)
-    val isPlaying: State<Boolean> = _isPlaying
+    private val _isPlaying = MutableStateFlow(false)
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
-    private val _playbackStatus = mutableStateOf("Idle")
-    val playbackStatus: State<String> = _playbackStatus
+    private val _playbackStatus = MutableStateFlow("Idle")
+    val playbackStatus: StateFlow<String> = _playbackStatus.asStateFlow()
 
     @Volatile
     private var playbackActive = false
