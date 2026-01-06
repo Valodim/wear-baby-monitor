@@ -1,5 +1,6 @@
 package horse.amazin.babymonitor.wear
 
+import horse.amazin.babymonitor.shared.AutoStreamConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,7 +16,7 @@ object AudioMonitorServiceState {
     val currentLoudness: StateFlow<Float?> = _currentLoudness.asStateFlow()
 
     private val _autoStreamConfig =
-        MutableStateFlow<horse.amazin.babymonitor.shared.AutoStreamConfig?>(null)
+        MutableStateFlow<horse.amazin.babymonitor.shared.AutoStreamConfig?>(AutoStreamConfig(-75f, 2000))
     val autoStreamConfig: StateFlow<horse.amazin.babymonitor.shared.AutoStreamConfig?> =
         _autoStreamConfig.asStateFlow()
 

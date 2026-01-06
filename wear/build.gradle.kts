@@ -34,4 +34,5 @@ dependencies {
     debugImplementation(libs.ui.tooling)
     implementation(libs.androidx.activity.compose)
     implementation(libs.play.services.wearable)
+    implementation(libs.kotlinx.coroutines.play.services)
 }

@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import horse.amazin.babymonitor.wear.AudioMonitorServiceState.isStreaming
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,7 +44,6 @@ class MainActivity : ComponentActivity() {
                 }
                 val currentLoudness by AudioMonitorServiceState.currentLoudness.collectAsState()
                 val streamStatus by AudioMonitorServiceState.streamStatus.collectAsState()
-                val isStreaming by AudioMonitorServiceState.isStreaming.collectAsState()
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { granted ->
@@ -73,17 +73,17 @@ class MainActivity : ComponentActivity() {
                         } else {
                             Spacer(modifier = Modifier.height(8.dp))
                             Button(onClick = {
-                                val action = if (isStreaming) {
-                                    AudioMonitorService.ACTION_STOP_STREAM
+                                val action = if (currentLoudness == null) {
+                                    AudioMonitorService.ACTION_START
                                 } else {
-                                    AudioMonitorService.ACTION_START_STREAM
+                                    AudioMonitorService.ACTION_STOP
                                 }
                                 val intent = Intent(context, AudioMonitorService::class.java).apply {
                                     this.action = action
                                 }
                                 ContextCompat.startForegroundService(context, intent)
                             }) {
-                                Text(text = if (isStreaming) "Stop streaming" else "Start streaming")
+                                Text(text = if (currentLoudness == null) "Start monitor" else "Stop monitor")
                             }
                         }
                     }

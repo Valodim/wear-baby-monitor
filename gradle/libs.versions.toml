@@ -3,6 +3,7 @@ activityCompose = "1.12.2"
 agp = "8.13.2"
 composeBom = "2025.12.01"
 kotlin = "2.3.0"
+kotlinx = "1.10.2"
 coreKtx = "1.17.0"
 appcompat = "1.7.1"
 material = "1.13.0"
@@ -19,6 +20,7 @@ androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "playServicesWearable" }
 ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "kotlinx" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
