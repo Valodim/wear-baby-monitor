@@ -10,12 +10,16 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 
 class BabyMonitorService : Service() {
+    private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
+
     private lateinit var playbackController: PlaybackController
     private lateinit var loudnessReceiver: LoudnessReceiver
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -32,7 +36,7 @@ class BabyMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForeground(NOTIFICATION_ID, buildNotification("Starting"))
         return START_STICKY
     }
 
@@ -59,7 +63,7 @@ class BabyMonitorService : Service() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(statusText: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val contentIntent = PendingIntent.getActivity(
             this,
@@ -70,22 +74,39 @@ class BabyMonitorService : Service() {
 
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("Baby Monitor")
-            .setContentText("Playback service running")
+            .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(contentIntent)
             .setOngoing(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
+    private fun updateNotification(statusText: String) {
+        notificationManager.notify(NOTIFICATION_ID, buildNotification(statusText))
+    }
+
+    @OptIn(FlowPreview::class)
     private fun collectPlaybackState() {
         serviceScope.launch {
-            loudnessReceiver.lastReceived.collect { lastReceived.value = it }
+            loudnessReceiver.lastReceived.collect {
+                lastReceived.value = it
+            }
         }
         serviceScope.launch {
-            playbackController.playbackStatus.collect { playbackStatus.value = it }
+            loudnessReceiver.lastReceived.sample(1000).collect {
+                updateNotification("Loudness: ${it ?: "--"}")
+            }
         }
         serviceScope.launch {
-            playbackController.isStreaming.collect { isStreaming.value = it }
+            playbackController.playbackStatus.collect {
+                playbackStatus.value = it
+            }
+        }
+        serviceScope.launch {
+            playbackController.isStreaming.collect {
+                isStreaming.value = it
+            }
         }
     }
 
