@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.audiofx.LoudnessEnhancer
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -20,6 +21,7 @@ import horse.amazin.babymonitor.shared.OpusDecoderWrapper
 import java.io.IOException
 import java.io.InputStream
 import kotlin.math.max
+
 
 class PlaybackController(context: Context) {
     private val dataClient: DataClient = Wearable.getDataClient(context)
@@ -115,7 +117,13 @@ class PlaybackController(context: Context) {
             .setBufferSizeInBytes(bufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+
+        val enhancer = LoudnessEnhancer(track.audioSessionId)
+        // moderately increase volume, 600mB = +6dB
+        enhancer.setTargetGain(600)
+
         track.play()
+
         updatePlaybackStatus("Playing audio")
         playbackThread = Thread {
             val decoder = OpusDecoderWrapper()

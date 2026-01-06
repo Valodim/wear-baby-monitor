@@ -2,7 +2,7 @@ package horse.amazin.babymonitor.shared
 
 data class AutoStreamConfig(
     val thresholdDb: Float,
-    val durationMs: Long
+    val durationMs: Int
 )
 
 object AutoStreamConfigData {

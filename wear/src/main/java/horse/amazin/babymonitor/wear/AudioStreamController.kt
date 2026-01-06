@@ -77,10 +77,11 @@ class AudioStreamController(
                     if (read < pcmBuffer.size) {
                         pcmBuffer.fill(0, read, pcmBuffer.size)
                     }
-                    val loudnessDb = calculateLoudnessDb(pcmBuffer, read)
                     val now = System.currentTimeMillis()
 
+                    val loudnessDb = calculateLoudnessDb(pcmBuffer, read)
                     _currentLoudness.value = loudnessDb
+
                     if (now - lastSentAt >= 1000L) {
                         onLoudnessSample(loudnessDb, now)
                         lastSentAt = now
@@ -149,9 +150,15 @@ private class StreamSender(
     var totalFramesSent = 0L
     var lastStatsAt = System.currentTimeMillis()
 
+    var isClosed = false
+
     fun send(pcmBuffer: ShortArray) {
+        if (isClosed) {
+            return
+        }
+
         val encoded = encoder.encode(pcmBuffer)
-        writeFrame(stream, header, encoded)
+        writeFrame(encoded)
         totalBytesSent += encoded.size + header.size
         totalFramesSent += 1
 
@@ -170,18 +177,24 @@ private class StreamSender(
         }
     }
 
-    private fun writeFrame(stream: OutputStream, header: ByteArray, payload: ByteArray) {
+    private fun writeFrame(payload: ByteArray) {
         val length = payload.size
         header[0] = (length ushr 24).toByte()
         header[1] = (length ushr 16).toByte()
         header[2] = (length ushr 8).toByte()
         header[3] = length.toByte()
-        stream.write(header)
-        stream.write(payload)
-        stream.flush()
+        try {
+            stream.write(header)
+            stream.write(payload)
+            stream.flush()
+        } catch (e: IOException) {
+            Log.d("StreamSender", "Closing stream due to error", e)
+            close()
+        }
     }
 
     fun close() {
+        isClosed = true
         try {
             stream.close()
         } catch (_: IOException) {

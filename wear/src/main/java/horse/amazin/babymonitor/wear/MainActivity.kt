@@ -5,8 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import horse.amazin.babymonitor.wear.AudioMonitorServiceState.isStreaming
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,6 +42,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 val currentLoudness by AudioMonitorServiceState.currentLoudness.collectAsState()
+                val config by AudioMonitorServiceState.autoStreamConfig.collectAsState()
                 val streamStatus by AudioMonitorServiceState.streamStatus.collectAsState()
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
@@ -59,10 +59,16 @@ class MainActivity : ComponentActivity() {
                             text = if (!hasMicPermission) {
                                 "Mic permission required"
                             } else {
-                                "Current loudness: ${currentLoudness?.let { "%.1f".format(it) } ?: "--"} dB"
+                                "${currentLoudness?.let { "%.0f".format(it) } ?: "--"} dB / ${
+                                    config?.thresholdDb?.let {
+                                        "%.0f".format(
+                                            it
+                                        )
+                                    } ?: "--"
+                                } dB"
                             }
                         )
-                        Text(text = "Stream: $streamStatus")
+                        Text(text = streamStatus)
                         if (!hasMicPermission) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Button(onClick = {
@@ -78,9 +84,10 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     AudioMonitorService.ACTION_STOP
                                 }
-                                val intent = Intent(context, AudioMonitorService::class.java).apply {
-                                    this.action = action
-                                }
+                                val intent =
+                                    Intent(context, AudioMonitorService::class.java).apply {
+                                        this.action = action
+                                    }
                                 ContextCompat.startForegroundService(context, intent)
                             }) {
                                 Text(text = if (currentLoudness == null) "Start monitor" else "Stop monitor")

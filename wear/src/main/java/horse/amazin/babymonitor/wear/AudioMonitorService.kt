@@ -1,12 +1,10 @@
 package horse.amazin.babymonitor.wear
 
-import android.R.attr.duration
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
-import android.net.Uri
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -56,7 +54,7 @@ class AudioMonitorService : Service() {
             if (event.dataItem.uri.path == AutoStreamConfigData.PATH) {
                 when (event.type) {
                     DataEvent.TYPE_CHANGED -> {
-                        updateConfig(event.dataItem)
+                        // updateConfig(event.dataItem)
                     }
 
                     DataEvent.TYPE_DELETED -> {
@@ -70,7 +68,7 @@ class AudioMonitorService : Service() {
     private fun updateConfig(dataItem: DataItem) {
         val dataMap = DataMapItem.fromDataItem(dataItem).dataMap
         val threshold = dataMap.getFloat(AutoStreamConfigData.KEY_THRESHOLD_DB)
-        val duration = dataMap.getLong(AutoStreamConfigData.KEY_MIN_DURATION_MS)
+        val duration = dataMap.getInt(AutoStreamConfigData.KEY_MIN_DURATION_MS)
         AudioMonitorServiceState.updateAutoStreamConfig(
             AutoStreamConfig(threshold, duration)
         )
@@ -79,22 +77,25 @@ class AudioMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
 
-
         createNotificationChannel()
         dataClient.addListener(autoStreamConfigListener)
 
-        serviceScope.launch {
-            val dataItems = dataClient.dataItems.await()
-            val configData = dataItems.find { it.uri.path == AutoStreamConfigData.PATH }
-            if (configData != null) {
-                updateConfig(configData)
-            } else {
-                AudioMonitorServiceState.updateAutoStreamConfig(
-                    AutoStreamConfig(-75f, 500)
-                )
-            }
-            dataItems.release()
-        }
+        AudioMonitorServiceState.updateAutoStreamConfig(
+            AutoStreamConfig(-75f, 1000)
+        )
+
+//        serviceScope.launch {
+//            val dataItems = dataClient.dataItems.await()
+//            val configData = dataItems.find { it.uri.path == AutoStreamConfigData.PATH }
+//            if (configData != null) {
+//                updateConfig(configData)
+//            } else {
+//                AudioMonitorServiceState.updateAutoStreamConfig(
+//                    AutoStreamConfig(-75f, 500)
+//                )
+//            }
+//            dataItems.release()
+//        }
 
         audioStreamController = AudioStreamController(applicationContext, this::onLoudnessSample)
         audioStreamController.initialize()
@@ -120,12 +121,12 @@ class AudioMonitorService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        AudioMonitorServiceState.updateStreamStatus("Idle")
-        AudioMonitorServiceState.updateLoudness(null)
-        channelClient.unregisterChannelCallback(channelCallback)
         dataClient.removeListener(autoStreamConfigListener)
+        channelClient.unregisterChannelCallback(channelCallback)
         audioStreamController.close()
         serviceScope.cancel()
+        AudioMonitorServiceState.updateStreamStatus("Idle")
+        AudioMonitorServiceState.updateLoudness(null)
     }
 
     var belowThresholdSince: Long? = null
@@ -171,16 +172,22 @@ class AudioMonitorService : Service() {
                 if (streamingChannel != null) {
                     val currentBelowThreshold = belowThresholdSince
                     if (currentBelowThreshold != null) {
-                        if (currentBelowThreshold - now > config.durationMs) {
+                        val duration = now - currentBelowThreshold
+                        if (duration > config.durationMs * 3) {
                             closeStreamingChannel()
+                        } else {
+                            AudioMonitorServiceState.updateStreamStatus("Streaming (%d/%d)".format(duration / 100, config.durationMs * 3 / 100))
                         }
                         return@collect
                     }
                 } else {
                     val currentAboveThreshold = aboveThresholdSince
                     if (currentAboveThreshold != null) {
-                        if (currentAboveThreshold - now > config.durationMs) {
+                        val duration = now - currentAboveThreshold
+                        if (duration > config.durationMs) {
                             openStreamingChannel()
+                        } else {
+                            AudioMonitorServiceState.updateStreamStatus("Monitoring (%d/%d)".format(duration / 100, config.durationMs / 100))
                         }
                     }
                 }
@@ -251,13 +258,13 @@ class AudioMonitorService : Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Audio Monitoring",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_HIGH
         )
         notificationManager.createNotificationChannel(channel)
     }
 
     companion object {
-        private const val CHANNEL_ID = "audio_monitoring"
+        private const val CHANNEL_ID = "audio_monitoring2"
         private const val NOTIFICATION_ID = 1001
         const val ACTION_START = "start"
         const val ACTION_STOP = "stop"
