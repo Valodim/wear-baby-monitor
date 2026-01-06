@@ -1,11 +1,11 @@
 package horse.amazin.babymonitor
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
@@ -15,20 +15,20 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
-class PlaybackService : Service() {
+class BabyMonitorService : Service() {
     private lateinit var playbackController: PlaybackController
     private lateinit var loudnessReceiver: LoudnessReceiver
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
         super.onCreate()
+        createNotificationChannel()
         playbackController = PlaybackController(applicationContext)
         loudnessReceiver = LoudnessReceiver(applicationContext)
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
         collectPlaybackState()
         playbackController.init()
         loudnessReceiver.init()
+        isActive.value = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -39,6 +39,7 @@ class PlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        isActive.value = false
         playbackController.close()
         loudnessReceiver.close()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -47,26 +48,34 @@ class PlaybackService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(NotificationManager::class.java)
-            val channel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                "Baby Monitor Playback",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Playback status for Baby Monitor"
-            }
-            manager.createNotificationChannel(channel)
+        val manager = getSystemService(NotificationManager::class.java)
+        val channel = NotificationChannel(
+            NOTIFICATION_CHANNEL_ID,
+            "Baby Monitor Playback",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Playback status for Baby Monitor"
         }
+        manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification() = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-        .setContentTitle("Baby Monitor")
-        .setContentText("Playback service running")
-        .setSmallIcon(android.R.drawable.ic_media_play)
-        .setContentIntent(buildContentIntent())
-        .setOngoing(true)
-        .build()
+    private fun buildNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setContentTitle("Baby Monitor")
+            .setContentText("Playback service running")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentIntent(contentIntent)
+            .setOngoing(true)
+            .build()
+    }
 
     private fun collectPlaybackState() {
         serviceScope.launch {
@@ -76,25 +85,16 @@ class PlaybackService : Service() {
             playbackController.playbackStatus.collect { playbackStatus.value = it }
         }
         serviceScope.launch {
-            playbackController.isPlaying.collect { isPlaying.value = it }
+            playbackController.isStreaming.collect { isStreaming.value = it }
         }
     }
 
-    private fun buildContentIntent(): PendingIntent {
-        val intent = Intent(this, MainActivity::class.java)
-        return PendingIntent.getActivity(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-    }
-
     companion object {
-        private const val NOTIFICATION_CHANNEL_ID = "playback_service"
+        private const val NOTIFICATION_CHANNEL_ID = "playback_service2"
         private const val NOTIFICATION_ID = 1001
         val lastReceived = MutableStateFlow<Float?>(null)
         val playbackStatus = MutableStateFlow("Idle")
-        val isPlaying = MutableStateFlow(false)
+        val isStreaming = MutableStateFlow(false)
+        val isActive = MutableStateFlow(false)
     }
 }

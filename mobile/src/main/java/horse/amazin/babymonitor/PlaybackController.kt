@@ -25,7 +25,7 @@ class PlaybackController(context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val _isPlaying = MutableStateFlow(false)
-    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+    val isStreaming: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
     private val _playbackStatus = MutableStateFlow("Idle")
     val playbackStatus: StateFlow<String> = _playbackStatus.asStateFlow()

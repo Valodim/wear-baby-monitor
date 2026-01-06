@@ -7,7 +7,7 @@
         android:label="Baby Monitor"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <service
-            android:name=".PlaybackService"
+            android:name=".BabyMonitorService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
         <activity

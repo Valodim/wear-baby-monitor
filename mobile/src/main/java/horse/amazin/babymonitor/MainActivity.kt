@@ -31,7 +31,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 class MainActivity : ComponentActivity() {
     private lateinit var autoStreamConfigSender: AutoStreamConfigSender
-    private val playbackServiceRunning = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,11 +41,11 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    val lastReceived by PlaybackService.lastReceived.collectAsState(initial = null)
-                    val playbackStatus by PlaybackService.playbackStatus.collectAsState(initial = "Idle")
-                    val isServiceRunning by playbackServiceRunning
-                    var thresholdText by rememberSaveable { mutableStateOf("-35.0") }
-                    var durationText by rememberSaveable { mutableStateOf("500") }
+                    val lastReceived by BabyMonitorService.lastReceived.collectAsState(initial = null)
+                    val playbackStatus by BabyMonitorService.playbackStatus.collectAsState(initial = "Idle")
+                    val isServiceActive by BabyMonitorService.isActive.collectAsState(false)
+                    var thresholdText by rememberSaveable { mutableStateOf("-75.0") }
+                    var durationText by rememberSaveable { mutableStateOf("1000") }
                     var autoStreamEnabled by rememberSaveable { mutableStateOf(true) }
 
                     val thresholdValue = thresholdText.toFloatOrNull()
@@ -72,7 +71,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         Text(text = "Stream: $playbackStatus")
-                        Text(text = "Service: ${if (isServiceRunning) "Running" else "Stopped"}")
+                        Text(text = "Service: ${if (isServiceActive) "Running" else "Stopped"}")
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(0.85f),
@@ -80,7 +79,7 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Button(
                                 onClick = { startPlaybackService() },
-                                enabled = !isServiceRunning,
+                                enabled = !isServiceActive,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("Start Service")
@@ -88,7 +87,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
                                 onClick = { stopPlaybackService() },
-                                enabled = isServiceRunning,
+                                enabled = isServiceActive,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("Stop Service")
@@ -139,19 +138,13 @@ class MainActivity : ComponentActivity() {
         startPlaybackService()
     }
 
-    override fun onStop() {
-        super.onStop()
-    }
-
     private fun startPlaybackService() {
-        val intent = Intent(this, PlaybackService::class.java)
+        val intent = Intent(this, BabyMonitorService::class.java)
         startService(intent)
-        playbackServiceRunning.value = true
     }
 
     private fun stopPlaybackService() {
-        val intent = Intent(this, PlaybackService::class.java)
+        val intent = Intent(this, BabyMonitorService::class.java)
         stopService(intent)
-        playbackServiceRunning.value = false
     }
 }
