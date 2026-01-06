@@ -121,7 +121,8 @@ class PlaybackController(context: Context) {
 
         val enhancer = LoudnessEnhancer(track.audioSessionId)
         // moderately increase volume, 600mB = +6dB
-        enhancer.setTargetGain(600)
+        enhancer.setTargetGain(1000)
+        enhancer.enabled = true
 
         track.play()
 
@@ -177,6 +178,7 @@ class PlaybackController(context: Context) {
                     // Ignore stop errors when track is not active.
                 }
                 track.release()
+                enhancer.release()
                 try {
                     stream.close()
                 } catch (_: IOException) {
