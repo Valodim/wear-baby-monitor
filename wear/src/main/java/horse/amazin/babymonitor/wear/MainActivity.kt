@@ -41,9 +41,9 @@ class MainActivity : ComponentActivity() {
                         ) == PackageManager.PERMISSION_GRANTED
                     )
                 }
-                val currentLoudness by AudioMonitorServiceState.currentLoudness.collectAsState()
-                val config by AudioMonitorServiceState.autoStreamConfig.collectAsState()
-                val streamStatus by AudioMonitorServiceState.streamStatus.collectAsState()
+                val currentLoudness by AudioMonitorService.currentLoudness.collectAsState()
+                val config by BabyMonitorConfigState.babyMonitorConfig.collectAsState()
+                val streamStatus by AudioMonitorService.streamStatus.collectAsState()
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { granted ->

@@ -16,13 +16,16 @@ import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import horse.amazin.babymonitor.shared.AudioStreamChannel
-import horse.amazin.babymonitor.shared.AutoStreamConfig
+import horse.amazin.babymonitor.shared.BabyMonitorConfig
 import horse.amazin.babymonitor.shared.AutoStreamConfigData
 import horse.amazin.babymonitor.shared.LoudnessData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -58,7 +61,7 @@ class AudioMonitorService : Service() {
                     }
 
                     DataEvent.TYPE_DELETED -> {
-                        AudioMonitorServiceState.updateAutoStreamConfig(null)
+                        BabyMonitorConfigState.updateAutoStreamConfig(null)
                     }
                 }
             }
@@ -69,8 +72,8 @@ class AudioMonitorService : Service() {
         val dataMap = DataMapItem.fromDataItem(dataItem).dataMap
         val threshold = dataMap.getFloat(AutoStreamConfigData.KEY_THRESHOLD_DB)
         val duration = dataMap.getInt(AutoStreamConfigData.KEY_MIN_DURATION_MS)
-        AudioMonitorServiceState.updateAutoStreamConfig(
-            AutoStreamConfig(threshold, duration)
+        BabyMonitorConfigState.updateAutoStreamConfig(
+            BabyMonitorConfig(threshold, duration)
         )
     }
 
@@ -80,8 +83,8 @@ class AudioMonitorService : Service() {
         createNotificationChannel()
         dataClient.addListener(autoStreamConfigListener)
 
-        AudioMonitorServiceState.updateAutoStreamConfig(
-            AutoStreamConfig(-75f, 1000)
+        BabyMonitorConfigState.updateAutoStreamConfig(
+            BabyMonitorConfig(-75f, 1000)
         )
 
 //        serviceScope.launch {
@@ -106,7 +109,7 @@ class AudioMonitorService : Service() {
 
         startForeground(NOTIFICATION_ID, buildNotification(currentNotificationText(false)))
 
-        AudioMonitorServiceState.updateStreamStatus("Monitoring")
+        _streamStatus.value = "Monitoring"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -125,8 +128,8 @@ class AudioMonitorService : Service() {
         channelClient.unregisterChannelCallback(channelCallback)
         audioStreamController.close()
         serviceScope.cancel()
-        AudioMonitorServiceState.updateStreamStatus("Idle")
-        AudioMonitorServiceState.updateLoudness(null)
+        _streamStatus.value = "Idle"
+         _currentLoudness.value = null
     }
 
     var belowThresholdSince: Long? = null
@@ -135,20 +138,20 @@ class AudioMonitorService : Service() {
 
     private fun observeControllerState() {
         serviceScope.launch {
-            AudioMonitorServiceState.isStreaming.collect { isStreaming ->
+            isStreaming.collect { isStreaming ->
                 updateNotification(currentNotificationText(isStreaming))
             }
         }
         serviceScope.launch {
             audioStreamController.currentLoudness.collect { loudness ->
-                AudioMonitorServiceState.updateLoudness(loudness)
+                _currentLoudness.value = loudness
             }
         }
         serviceScope.launch(Dispatchers.Default) {
             audioStreamController.currentLoudness.collect { loudness ->
                 loudness ?: return@collect
 
-                val config = AudioMonitorServiceState.autoStreamConfig.value ?: return@collect
+                val config = BabyMonitorConfigState.babyMonitorConfig.value ?: return@collect
 
                 // Skip value until pending change is applied
                 if (pendingChange) {
@@ -176,7 +179,7 @@ class AudioMonitorService : Service() {
                         if (duration > config.durationMs * 3) {
                             closeStreamingChannel()
                         } else {
-                            AudioMonitorServiceState.updateStreamStatus("Streaming (%d/%d)".format(duration / 100, config.durationMs * 3 / 100))
+                            _streamStatus.value = "Streaming (%d/%d)".format(duration / 100, config.durationMs * 3 / 100)
                         }
                         return@collect
                     }
@@ -187,7 +190,7 @@ class AudioMonitorService : Service() {
                         if (duration > config.durationMs) {
                             openStreamingChannel()
                         } else {
-                            AudioMonitorServiceState.updateStreamStatus("Monitoring (%d/%d)".format(duration / 100, config.durationMs / 100))
+                            _streamStatus.value = "Monitoring (%d/%d)".format(duration / 100, config.durationMs / 100)
                         }
                     }
                 }
@@ -208,8 +211,8 @@ class AudioMonitorService : Service() {
                 audioStreamController.startStreaming(outputStream)
                 streamingChannel = channel
 
-                AudioMonitorServiceState.updateStreaming(true)
-                AudioMonitorServiceState.updateStreamStatus("Streaming audio..")
+                _isStreaming.value = true
+                _streamStatus.value = "Streaming audio.."
             } catch (e: Exception) {
                 Log.e("AudioMonitorService", "Failed initializing channel", e)
             } finally {
@@ -221,8 +224,8 @@ class AudioMonitorService : Service() {
     private fun closeStreamingChannel() {
         audioStreamController.stopStreaming()
         streamingChannel = null
-        AudioMonitorServiceState.updateStreaming(false)
-        AudioMonitorServiceState.updateStreamStatus("Monitoring")
+        _isStreaming.value = false
+        _streamStatus.value = "Monitoring"
     }
 
     private fun onLoudnessSample(db: Float, timestamp: Long) {
@@ -268,5 +271,14 @@ class AudioMonitorService : Service() {
         private const val NOTIFICATION_ID = 1001
         const val ACTION_START = "start"
         const val ACTION_STOP = "stop"
+
+        private val _streamStatus = MutableStateFlow("Idle")
+        val streamStatus: StateFlow<String> = _streamStatus.asStateFlow()
+
+        private val _isStreaming = MutableStateFlow(false)
+        val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
+
+        private val _currentLoudness = MutableStateFlow<Float?>(null)
+        val currentLoudness: StateFlow<Float?> = _currentLoudness.asStateFlow()
     }
 }
