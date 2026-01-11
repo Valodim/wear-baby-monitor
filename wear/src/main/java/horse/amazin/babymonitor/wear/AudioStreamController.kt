@@ -21,7 +21,7 @@ import kotlin.math.sqrt
 
 class AudioStreamController(
     val context: Context,
-    val onLoudnessSample: (db: Float, timestamp: Long) -> Unit,
+    val onLoudnessSample: (db: Float) -> Unit,
 ) {
     private var streamSender: StreamSender? = null
 
@@ -83,7 +83,7 @@ class AudioStreamController(
                     _currentLoudness.value = loudnessDb
 
                     if (now - lastSentAt >= 1000L) {
-                        onLoudnessSample(loudnessDb, now)
+                        onLoudnessSample(loudnessDb)
                         lastSentAt = now
                     }
 

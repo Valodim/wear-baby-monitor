@@ -1,7 +1,7 @@
 package horse.amazin.babymonitor
 
-import android.content.Intent
 import android.os.Bundle
+import android.os.Parcel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -11,16 +11,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,40 +26,36 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.google.android.gms.wearable.CapabilityClient
+import com.google.android.gms.wearable.Node
+import com.google.android.gms.wearable.Wearable
+import horse.amazin.babymonitor.shared.BabyMonitorSettings
+import horse.amazin.babymonitor.shared.CAPABILITY_BABY_MONITOR_SENDER
+import horse.amazin.babymonitor.shared.MESSAGE_PATH_RECEIVER_SET_ENABLED
 import kotlinx.coroutines.FlowPreview
 
 @OptIn(FlowPreview::class)
 class MainActivity : ComponentActivity() {
-    private lateinit var autoStreamConfigSender: AutoStreamConfigSender
+    private val capabilityClient by lazy { Wearable.getCapabilityClient(applicationContext) }
+    private val senderNodes = mutableStateOf<Set<Node>>(emptySet())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        autoStreamConfigSender = AutoStreamConfigSender(this)
+
         setContent {
             MaterialTheme {
                 Box(
-                    modifier = Modifier.safeDrawingPadding().fillMaxSize(),
+                    modifier = Modifier
+                        .safeDrawingPadding()
+                        .fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val lastReceived by BabyMonitorService.lastReceived.collectAsState(initial = null)
-                    val playbackStatus by BabyMonitorService.playbackStatus.collectAsState(initial = "Idle")
-                    val isServiceActive by BabyMonitorService.isActive.collectAsState(false)
-                    var thresholdText by rememberSaveable { mutableStateOf("-75.0") }
+                    val lastReceived by BabyMonitorReceiverService.lastReceived.collectAsState(initial = null)
+                    val playbackStatus by BabyMonitorReceiverService.playbackStatus.collectAsState(initial = "Idle")
+                    val activeNode by BabyMonitorReceiverService.activeNode.collectAsState(null)
+
+                    var thresholdText by rememberSaveable { mutableStateOf("-75") }
                     var durationText by rememberSaveable { mutableStateOf("1000") }
-                    var autoStreamEnabled by rememberSaveable { mutableStateOf(true) }
-
-                    val thresholdValue = thresholdText.toFloatOrNull()
-                    val durationValue = durationText.toIntOrNull()
-
-                    LaunchedEffect(thresholdValue, durationValue, autoStreamEnabled) {
-                        if (thresholdValue != null && durationValue != null) {
-                            autoStreamConfigSender.updateConfig(
-                                thresholdDb = thresholdValue,
-                                minDurationMs = durationValue,
-                                enabled = autoStreamEnabled
-                            )
-                        }
-                    }
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(text = "Baby Monitor (Phone)")
@@ -75,28 +67,42 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         Text(text = "Stream: $playbackStatus")
-                        Text(text = "Service: ${if (isServiceActive) "Running" else "Stopped"}")
                         Spacer(modifier = Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(0.85f),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Button(
-                                onClick = { startPlaybackService() },
-                                enabled = !isServiceActive,
-                                modifier = Modifier.weight(1f)
+
+                        if (activeNode != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(0.85f),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Start Service")
+                                Button(
+                                    onClick = { sendStopMessage(activeNode!!) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Stop: ${activeNode!!.displayName}")
+                                }
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = { stopPlaybackService() },
-                                enabled = isServiceActive,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Stop Service")
+                        } else {
+                            for (node in senderNodes.value) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(0.85f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            sendStartMessage(
+                                                node,
+                                                thresholdText.toFloat(),
+                                                durationText.toInt(),
+                                            )
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Start: ${node.displayName}")
+                                    }
+                                }
                             }
                         }
+
                         Spacer(modifier = Modifier.height(24.dp))
                         Text(text = "Auto-Stream Settings")
                         Spacer(modifier = Modifier.height(12.dp))
@@ -115,22 +121,6 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxWidth(0.85f),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth(0.85f)
-                                .padding(horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Enabled",
-                                modifier = Modifier.weight(1f)
-                            )
-                            Switch(
-                                checked = autoStreamEnabled,
-                                onCheckedChange = { autoStreamEnabled = it }
-                            )
-                        }
                     }
                 }
             }
@@ -139,16 +129,66 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        startPlaybackService()
+        capabilityClient.addListener(capabilityChangedListener, CAPABILITY_BABY_MONITOR_SENDER)
+        updateSenderNodes()
     }
 
-    private fun startPlaybackService() {
-        val intent = Intent(this, BabyMonitorService::class.java)
-        startService(intent)
+    override fun onStop() {
+        super.onStop()
+        capabilityClient.removeListener(capabilityChangedListener, CAPABILITY_BABY_MONITOR_SENDER)
     }
 
-    private fun stopPlaybackService() {
-        val intent = Intent(this, BabyMonitorService::class.java)
-        stopService(intent)
+    val capabilityChangedListener = CapabilityClient.OnCapabilityChangedListener {
+        updateSenderNodes()
+    }
+
+    private fun updateSenderNodes() {
+        capabilityClient.getCapability(
+            CAPABILITY_BABY_MONITOR_SENDER,
+            CapabilityClient.FILTER_ALL
+        ).addOnSuccessListener { capabilityInfo ->
+            senderNodes.value = capabilityInfo.nodes
+        }
+    }
+
+    private fun sendStartMessage(node: Node, thresholdDb: Float, durationMs: Int) {
+        BabyMonitorReceiverService.activeNode.value = node
+        BabyMonitorReceiverService.start(applicationContext)
+
+        val settings = Bundle().apply {
+            putString(BabyMonitorSettings.KEY_ACTION, BabyMonitorSettings.ACTION_START)
+            putFloat(BabyMonitorSettings.KEY_THRESHOLD_DB, thresholdDb)
+            putInt(BabyMonitorSettings.KEY_MIN_DURATION_MS, durationMs)
+        }
+
+        val parcel = Parcel.obtain()
+        val messageData = try {
+            parcel.writeBundle(settings)
+            parcel.marshall()
+        } finally {
+            parcel.recycle()
+        }
+
+        val messageClient = Wearable.getMessageClient(applicationContext)
+        messageClient.sendMessage(node.id, MESSAGE_PATH_RECEIVER_SET_ENABLED, messageData)
+    }
+
+    private fun sendStopMessage(node: Node) {
+        BabyMonitorReceiverService.activeNode.value = null
+
+        val settings = Bundle().apply {
+            putString(BabyMonitorSettings.KEY_ACTION, BabyMonitorSettings.ACTION_STOP)
+        }
+
+        val parcel = Parcel.obtain()
+        val messageData = try {
+            parcel.writeBundle(settings)
+            parcel.marshall()
+        } finally {
+            parcel.recycle()
+        }
+
+        val messageClient = Wearable.getMessageClient(applicationContext)
+        messageClient.sendMessage(node.id, MESSAGE_PATH_RECEIVER_SET_ENABLED, messageData)
     }
 }

@@ -1,7 +1,6 @@
 package horse.amazin.babymonitor.wear
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -41,9 +40,8 @@ class MainActivity : ComponentActivity() {
                         ) == PackageManager.PERMISSION_GRANTED
                     )
                 }
-                val currentLoudness by AudioMonitorService.currentLoudness.collectAsState()
-                val config by BabyMonitorConfigState.babyMonitorConfig.collectAsState()
-                val streamStatus by AudioMonitorService.streamStatus.collectAsState()
+                val currentLoudness by BabyMonitorSenderService.currentLoudness.collectAsState()
+                val streamStatus by BabyMonitorSenderService.streamStatus.collectAsState()
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { granted ->
@@ -59,13 +57,7 @@ class MainActivity : ComponentActivity() {
                             text = if (!hasMicPermission) {
                                 "Mic permission required"
                             } else {
-                                "${currentLoudness?.let { "%.0f".format(it) } ?: "--"} dB / ${
-                                    config?.thresholdDb?.let {
-                                        "%.0f".format(
-                                            it
-                                        )
-                                    } ?: "--"
-                                } dB"
+                                "${currentLoudness?.let { "%.0f".format(it) } ?: "--"} dB"
                             }
                         )
                         Text(text = streamStatus)
@@ -75,22 +67,6 @@ class MainActivity : ComponentActivity() {
                                 permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }) {
                                 Text(text = "Grant microphone")
-                            }
-                        } else {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(onClick = {
-                                val action = if (currentLoudness == null) {
-                                    AudioMonitorService.ACTION_START
-                                } else {
-                                    AudioMonitorService.ACTION_STOP
-                                }
-                                val intent =
-                                    Intent(context, AudioMonitorService::class.java).apply {
-                                        this.action = action
-                                    }
-                                ContextCompat.startForegroundService(context, intent)
-                            }) {
-                                Text(text = if (currentLoudness == null) "Start monitor" else "Stop monitor")
                             }
                         }
                     }

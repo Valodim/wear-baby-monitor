@@ -59,5 +59,5 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     debugImplementation(libs.ui.tooling)
     implementation(libs.androidx.activity.compose)
-
+    implementation(libs.kotlinx.coroutines.play.services)
 }

@@ -100,8 +100,8 @@ class PlaybackController(context: Context) {
             .build()
 
         val enhancer = LoudnessEnhancer(track.audioSessionId)
-        // moderately increase volume, 600mB = +6dB
-        enhancer.setTargetGain(1000)
+        // moderately increase volume, 2000mB = +20dB (4x)
+        enhancer.setTargetGain(2000)
         enhancer.enabled = true
 
         track.play()

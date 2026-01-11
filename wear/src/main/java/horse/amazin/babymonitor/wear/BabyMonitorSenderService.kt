@@ -3,22 +3,17 @@ package horse.amazin.babymonitor.wear
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.wearable.ChannelClient
-import com.google.android.gms.wearable.DataClient
-import com.google.android.gms.wearable.DataEvent
-import com.google.android.gms.wearable.DataItem
-import com.google.android.gms.wearable.DataMapItem
-import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
-import horse.amazin.babymonitor.shared.AudioStreamChannel
-import horse.amazin.babymonitor.shared.BabyMonitorConfig
-import horse.amazin.babymonitor.shared.AutoStreamConfigData
-import horse.amazin.babymonitor.shared.LoudnessData
+import horse.amazin.babymonitor.shared.CHANNEL_PATH_SENDER_AUDIO
+import horse.amazin.babymonitor.shared.MESSAGE_PATH_SENDER_LOUDNESS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,15 +23,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.nio.ByteBuffer
 
-class AudioMonitorService : Service() {
+class BabyMonitorSenderService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var audioStreamController: AudioStreamController
 
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
-    private val dataClient by lazy { Wearable.getDataClient(applicationContext) }
+    private val messageClient by lazy { Wearable.getMessageClient(applicationContext) }
     private val channelClient by lazy { Wearable.getChannelClient(applicationContext) }
     private val nodeClient by lazy { Wearable.getNodeClient(applicationContext) }
+
+    private var configNodeId: String? = null
+    private var configThresholdDb: Float = -75.0f
+    private var configDurationMs: Int = 1000
 
     private var streamingChannel: ChannelClient.Channel? = null
 
@@ -52,84 +52,62 @@ class AudioMonitorService : Service() {
         }
     }
 
-    private val autoStreamConfigListener = DataClient.OnDataChangedListener { dataEvents ->
-        dataEvents.forEach { event ->
-            if (event.dataItem.uri.path == AutoStreamConfigData.PATH) {
-                when (event.type) {
-                    DataEvent.TYPE_CHANGED -> {
-                        // updateConfig(event.dataItem)
-                    }
-
-                    DataEvent.TYPE_DELETED -> {
-                        BabyMonitorConfigState.updateAutoStreamConfig(null)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun updateConfig(dataItem: DataItem) {
-        val dataMap = DataMapItem.fromDataItem(dataItem).dataMap
-        val threshold = dataMap.getFloat(AutoStreamConfigData.KEY_THRESHOLD_DB)
-        val duration = dataMap.getInt(AutoStreamConfigData.KEY_MIN_DURATION_MS)
-        BabyMonitorConfigState.updateAutoStreamConfig(
-            BabyMonitorConfig(threshold, duration)
-        )
-    }
-
     override fun onCreate() {
         super.onCreate()
 
         createNotificationChannel()
-        dataClient.addListener(autoStreamConfigListener)
-
-        BabyMonitorConfigState.updateAutoStreamConfig(
-            BabyMonitorConfig(-75f, 1000)
-        )
-
-//        serviceScope.launch {
-//            val dataItems = dataClient.dataItems.await()
-//            val configData = dataItems.find { it.uri.path == AutoStreamConfigData.PATH }
-//            if (configData != null) {
-//                updateConfig(configData)
-//            } else {
-//                AudioMonitorServiceState.updateAutoStreamConfig(
-//                    AutoStreamConfig(-75f, 500)
-//                )
-//            }
-//            dataItems.release()
-//        }
-
-        audioStreamController = AudioStreamController(applicationContext, this::onLoudnessSample)
-        audioStreamController.initialize()
-
         channelClient.registerChannelCallback(channelCallback)
-
-        observeControllerState()
-
         startForeground(NOTIFICATION_ID, buildNotification(currentNotificationText(false)))
-
         _streamStatus.value = "Monitoring"
+
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> {}
+            ACTION_START -> {
+                val configNodeId = intent.getStringExtra(EXTRA_NODE_ID)
+                val configThresholdDb = intent.getFloatExtra(EXTRA_THRESHOLD_DB, -75.0f)
+                val configDurationMs = intent.getIntExtra(EXTRA_MIN_DURATION_MS, 1000)
+                initialize(configNodeId, configThresholdDb, configDurationMs)
+            }
+
             ACTION_STOP -> stopSelf()
         }
         return START_STICKY
+    }
+
+    private fun initialize(configNodeId: String?, configThresholdDb: Float, configDurationMs: Int) {
+        if (this.configNodeId != null) return
+
+        this.configNodeId = configNodeId
+        this.configThresholdDb = configThresholdDb
+        this.configDurationMs = configDurationMs
+
+        audioStreamController = AudioStreamController(applicationContext, this::onLoudnessSample)
+        audioStreamController.initialize()
+
+        observeControllerState()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()
-        dataClient.removeListener(autoStreamConfigListener)
+
         channelClient.unregisterChannelCallback(channelCallback)
-        audioStreamController.close()
         serviceScope.cancel()
+
         _streamStatus.value = "Idle"
-         _currentLoudness.value = null
+        _currentLoudness.value = null
+
+        // We were never initialized, nothing to do here
+        if (this.configNodeId == null) {
+            return
+        }
+
+        onLoudnessSample(0.0f)
+
+        audioStreamController.close()
     }
 
     var belowThresholdSince: Long? = null
@@ -151,8 +129,6 @@ class AudioMonitorService : Service() {
             audioStreamController.currentLoudness.collect { loudness ->
                 loudness ?: return@collect
 
-                val config = BabyMonitorConfigState.babyMonitorConfig.value ?: return@collect
-
                 // Skip value until pending change is applied
                 if (pendingChange) {
                     return@collect
@@ -160,13 +136,13 @@ class AudioMonitorService : Service() {
 
                 val now = System.currentTimeMillis()
 
-                if (loudness > config.thresholdDb && aboveThresholdSince == null) {
+                if (loudness > configThresholdDb && aboveThresholdSince == null) {
                     aboveThresholdSince = now
                     belowThresholdSince = null
                     return@collect
                 }
 
-                if (loudness <= config.thresholdDb && belowThresholdSince == null) {
+                if (loudness <= configThresholdDb && belowThresholdSince == null) {
                     aboveThresholdSince = null
                     belowThresholdSince = now
                     return@collect
@@ -176,10 +152,13 @@ class AudioMonitorService : Service() {
                     val currentBelowThreshold = belowThresholdSince
                     if (currentBelowThreshold != null) {
                         val duration = now - currentBelowThreshold
-                        if (duration > config.durationMs * 3) {
+                        if (duration > configDurationMs * 2) {
                             closeStreamingChannel()
                         } else {
-                            _streamStatus.value = "Streaming (%d/%d)".format(duration / 100, config.durationMs * 3 / 100)
+                            _streamStatus.value = "Streaming (%d/%d)".format(
+                                duration / 100,
+                                configDurationMs * 2 / 100
+                            )
                         }
                         return@collect
                     }
@@ -187,10 +166,11 @@ class AudioMonitorService : Service() {
                     val currentAboveThreshold = aboveThresholdSince
                     if (currentAboveThreshold != null) {
                         val duration = now - currentAboveThreshold
-                        if (duration > config.durationMs) {
+                        if (duration > configDurationMs) {
                             openStreamingChannel()
                         } else {
-                            _streamStatus.value = "Monitoring (%d/%d)".format(duration / 100, config.durationMs / 100)
+                            _streamStatus.value =
+                                "Monitoring (%d/%d)".format(duration / 100, configDurationMs / 100)
                         }
                     }
                 }
@@ -206,7 +186,7 @@ class AudioMonitorService : Service() {
         serviceScope.launch(Dispatchers.Main) {
             try {
                 val node = nodeClient.connectedNodes.await().firstOrNull() ?: return@launch
-                val channel = channelClient.openChannel(node.id, AudioStreamChannel.PATH).await()
+                val channel = channelClient.openChannel(node.id, CHANNEL_PATH_SENDER_AUDIO).await()
                 val outputStream = channelClient.getOutputStream(channel).await()
                 audioStreamController.startStreaming(outputStream)
                 streamingChannel = channel
@@ -228,12 +208,14 @@ class AudioMonitorService : Service() {
         _streamStatus.value = "Monitoring"
     }
 
-    private fun onLoudnessSample(db: Float, timestamp: Long) {
-        val request = PutDataMapRequest.create(LoudnessData.PATH).apply {
-            dataMap.putFloat(LoudnessData.KEY_DB, db)
-            dataMap.putLong(LoudnessData.KEY_TIMESTAMP, timestamp)
-        }.asPutDataRequest()
-        dataClient.putDataItem(request)
+    private fun onLoudnessSample(db: Float) {
+        val nodeId = configNodeId ?: return
+
+        val messageData = ByteBuffer.allocate(4).apply {
+            putFloat(db)
+        }.array()
+
+        messageClient.sendMessage(nodeId, MESSAGE_PATH_SENDER_LOUDNESS, messageData)
     }
 
     private fun currentNotificationText(isStreaming: Boolean): String {
@@ -245,11 +227,21 @@ class AudioMonitorService : Service() {
     }
 
     private fun buildNotification(statusText: String): Notification {
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(applicationContext, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Baby Monitor")
+            .setContentIntent(contentIntent)
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
+            .setLocalOnly(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
@@ -261,16 +253,20 @@ class AudioMonitorService : Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Audio Monitoring",
-            NotificationManager.IMPORTANCE_HIGH
+            NotificationManager.IMPORTANCE_LOW,
         )
         notificationManager.createNotificationChannel(channel)
     }
 
     companion object {
-        private const val CHANNEL_ID = "audio_monitoring2"
+        private const val EXTRA_NODE_ID = "node_id"
+        private const val EXTRA_THRESHOLD_DB = "threshold_db"
+        private const val EXTRA_MIN_DURATION_MS = "min_duration_ms"
+        private const val ACTION_START = "start"
+        private const val ACTION_STOP = "stop"
+
+        private const val CHANNEL_ID = "audio_monitoring3"
         private const val NOTIFICATION_ID = 1001
-        const val ACTION_START = "start"
-        const val ACTION_STOP = "stop"
 
         private val _streamStatus = MutableStateFlow("Idle")
         val streamStatus: StateFlow<String> = _streamStatus.asStateFlow()
@@ -280,5 +276,22 @@ class AudioMonitorService : Service() {
 
         private val _currentLoudness = MutableStateFlow<Float?>(null)
         val currentLoudness: StateFlow<Float?> = _currentLoudness.asStateFlow()
+
+        fun start(context: Context, nodeId: String, thresholdDb: Float, durationMs: Int) {
+            val intent = Intent(context, BabyMonitorSenderService::class.java).apply {
+                action = ACTION_START
+                putExtra(EXTRA_NODE_ID, nodeId)
+                putExtra(EXTRA_THRESHOLD_DB, thresholdDb)
+                putExtra(EXTRA_MIN_DURATION_MS, durationMs)
+            }
+            context.startForegroundService(intent)
+        }
+
+        fun stop(context: Context) {
+            val intent = Intent(context, BabyMonitorSenderService::class.java).apply {
+                action = ACTION_STOP
+            }
+            context.startService(intent)
+        }
     }
 }

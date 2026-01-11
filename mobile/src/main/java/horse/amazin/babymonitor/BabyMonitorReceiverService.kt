@@ -5,9 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import android.os.IBinder
+import android.os.Parcel
 import androidx.core.app.NotificationCompat
+import com.google.android.gms.wearable.Node
+import com.google.android.gms.wearable.Wearable
+import horse.amazin.babymonitor.shared.BabyMonitorSettings
+import horse.amazin.babymonitor.shared.MESSAGE_PATH_RECEIVER_SET_ENABLED
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -16,8 +23,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
+import kotlin.jvm.java
 
-class BabyMonitorService : Service() {
+class BabyMonitorReceiverService : Service() {
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
 
     private lateinit var playbackController: PlaybackController
@@ -32,18 +40,25 @@ class BabyMonitorService : Service() {
         collectPlaybackState()
         playbackController.init()
         loudnessReceiver.init()
-        isActive.value = true
+        startForeground(NOTIFICATION_ID, buildNotification("Starting"))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification("Starting"))
+        when (intent?.action) {
+            ACTION_START -> {}
+            ACTION_STOP -> stopSelf()
+        }
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        isActive.value = false
+        activeNode.value?.let {
+            sendStopMessage(it)
+        }
+
+        activeNode.value = null
         playbackController.close()
         loudnessReceiver.close()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -64,20 +79,30 @@ class BabyMonitorService : Service() {
     }
 
     private fun buildNotification(statusText: String): Notification {
-        val intent = Intent(this, MainActivity::class.java)
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
-            intent,
+            Intent(applicationContext, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val stopIntent =
+            PendingIntent.getService(
+                applicationContext,
+                0,
+                Intent(applicationContext, BabyMonitorReceiverService::class.java).apply {
+                    action = ACTION_STOP
+                },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
 
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("Baby Monitor")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(contentIntent)
+            .addAction(android.R.drawable.ic_delete, "Stop", stopIntent)
             .setOngoing(true)
+            .setLocalOnly(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
@@ -110,12 +135,39 @@ class BabyMonitorService : Service() {
         }
     }
 
+    private fun sendStopMessage(node: Node) {
+        val settings = Bundle().apply {
+            putString(BabyMonitorSettings.KEY_ACTION, BabyMonitorSettings.ACTION_STOP)
+        }
+
+        val parcel = Parcel.obtain()
+        val messageData = try {
+            parcel.writeBundle(settings)
+            parcel.marshall()
+        } finally {
+            parcel.recycle()
+        }
+
+        val messageClient = Wearable.getMessageClient(applicationContext)
+        messageClient.sendMessage(node.id, MESSAGE_PATH_RECEIVER_SET_ENABLED, messageData)
+    }
+
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "playback_service2"
         private const val NOTIFICATION_ID = 1001
         val lastReceived = MutableStateFlow<Float?>(null)
         val playbackStatus = MutableStateFlow("Idle")
         val isStreaming = MutableStateFlow(false)
-        val isActive = MutableStateFlow(false)
+        val activeNode = MutableStateFlow<Node?>(null)
+
+        private const val ACTION_START = "start"
+        private const val ACTION_STOP = "stop"
+
+        fun start(context: Context) {
+            val intent = Intent(context, BabyMonitorReceiverService::class.java).apply {
+                action = ACTION_START
+            }
+            context.startForegroundService(intent)
+        }
     }
 }

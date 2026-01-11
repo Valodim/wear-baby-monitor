@@ -1,45 +1,31 @@
 package horse.amazin.babymonitor
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
-import com.google.android.gms.wearable.DataClient
-import com.google.android.gms.wearable.DataEvent
-import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.MessageClient
 import com.google.android.gms.wearable.Wearable
-import horse.amazin.babymonitor.shared.LoudnessData
+import horse.amazin.babymonitor.shared.MESSAGE_PATH_SENDER_LOUDNESS
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.nio.ByteBuffer
 
 class LoudnessReceiver(context: Context) {
-    private val dataClient: DataClient = Wearable.getDataClient(context)
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val messageClient: MessageClient = Wearable.getMessageClient(context)
 
     private val _lastReceived = MutableStateFlow<Float?>(null)
     val lastReceived: StateFlow<Float?> = _lastReceived.asStateFlow()
 
-    private val loudnessListener = DataClient.OnDataChangedListener { dataEvents ->
-        dataEvents.forEach { event ->
-            if (event.type == DataEvent.TYPE_CHANGED && event.dataItem.uri.path == LoudnessData.PATH) {
-                val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
-                val db = dataMap.getFloat(LoudnessData.KEY_DB)
-                updateLastReceived(db)
-            }
-        }
-    }
-
-    private fun updateLastReceived(value: Float) {
-        mainHandler.post {
-            _lastReceived.value = value
+    private val messageListener = MessageClient.OnMessageReceivedListener { message ->
+        if (message.path == MESSAGE_PATH_SENDER_LOUDNESS) {
+            _lastReceived.value = ByteBuffer.wrap(message.data).getFloat()
         }
     }
 
     fun init() {
-        dataClient.addListener(loudnessListener)
+        messageClient.addListener(messageListener)
     }
 
     fun close() {
-        dataClient.removeListener(loudnessListener)
+        messageClient.removeListener(messageListener)
     }
 }
