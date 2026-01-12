@@ -19,10 +19,7 @@ import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.sqrt
 
-class AudioStreamController(
-    val context: Context,
-    val onLoudnessSample: (db: Float) -> Unit,
-) {
+class AudioStreamController(val context: Context) {
     private var streamSender: StreamSender? = null
 
     private val _currentLoudness = MutableStateFlow<Float?>(null)
@@ -77,16 +74,9 @@ class AudioStreamController(
                     if (read < pcmBuffer.size) {
                         pcmBuffer.fill(0, read, pcmBuffer.size)
                     }
-                    val now = System.currentTimeMillis()
 
                     val loudnessDb = calculateLoudnessDb(pcmBuffer, read)
                     _currentLoudness.value = loudnessDb
-
-                    if (now - lastSentAt >= 1000L) {
-                        onLoudnessSample(loudnessDb)
-                        lastSentAt = now
-                    }
-
                     streamSender?.send(pcmBuffer)
                 }
             } catch (error: IOException) {

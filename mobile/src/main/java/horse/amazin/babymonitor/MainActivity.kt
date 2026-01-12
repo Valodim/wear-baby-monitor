@@ -1,7 +1,6 @@
 package horse.amazin.babymonitor
 
 import android.os.Bundle
-import android.os.Parcel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -29,15 +28,15 @@ import androidx.compose.ui.unit.dp
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.Wearable
-import horse.amazin.babymonitor.shared.BabyMonitorSettings
 import horse.amazin.babymonitor.shared.CAPABILITY_BABY_MONITOR_SENDER
-import horse.amazin.babymonitor.shared.MESSAGE_PATH_RECEIVER_SET_ENABLED
+import horse.amazin.babymonitor.shared.WearMessageInteractor
 import kotlinx.coroutines.FlowPreview
 
 @OptIn(FlowPreview::class)
 class MainActivity : ComponentActivity() {
     private val capabilityClient by lazy { Wearable.getCapabilityClient(applicationContext) }
     private val senderNodes = mutableStateOf<Set<Node>>(emptySet())
+    private val wearMessageInteractor = WearMessageInteractor(applicationContext)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -127,6 +126,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun sendStartMessage(node: Node, thresholdDb: Float, durationMs: Int) {
+        BabyMonitorReceiverService.start(applicationContext)
+        wearMessageInteractor.sendStartMessage(node, thresholdDb, durationMs)
+    }
+
+    private fun sendStopMessage(node: Node) {
+        BabyMonitorReceiverService.activeNode.value = null
+        wearMessageInteractor.sendStopMessage(node)
+    }
+
     override fun onStart() {
         super.onStart()
         capabilityClient.addListener(capabilityChangedListener, CAPABILITY_BABY_MONITOR_SENDER)
@@ -149,46 +158,5 @@ class MainActivity : ComponentActivity() {
         ).addOnSuccessListener { capabilityInfo ->
             senderNodes.value = capabilityInfo.nodes
         }
-    }
-
-    private fun sendStartMessage(node: Node, thresholdDb: Float, durationMs: Int) {
-        BabyMonitorReceiverService.activeNode.value = node
-        BabyMonitorReceiverService.start(applicationContext)
-
-        val settings = Bundle().apply {
-            putString(BabyMonitorSettings.KEY_ACTION, BabyMonitorSettings.ACTION_START)
-            putFloat(BabyMonitorSettings.KEY_THRESHOLD_DB, thresholdDb)
-            putInt(BabyMonitorSettings.KEY_MIN_DURATION_MS, durationMs)
-        }
-
-        val parcel = Parcel.obtain()
-        val messageData = try {
-            parcel.writeBundle(settings)
-            parcel.marshall()
-        } finally {
-            parcel.recycle()
-        }
-
-        val messageClient = Wearable.getMessageClient(applicationContext)
-        messageClient.sendMessage(node.id, MESSAGE_PATH_RECEIVER_SET_ENABLED, messageData)
-    }
-
-    private fun sendStopMessage(node: Node) {
-        BabyMonitorReceiverService.activeNode.value = null
-
-        val settings = Bundle().apply {
-            putString(BabyMonitorSettings.KEY_ACTION, BabyMonitorSettings.ACTION_STOP)
-        }
-
-        val parcel = Parcel.obtain()
-        val messageData = try {
-            parcel.writeBundle(settings)
-            parcel.marshall()
-        } finally {
-            parcel.recycle()
-        }
-
-        val messageClient = Wearable.getMessageClient(applicationContext)
-        messageClient.sendMessage(node.id, MESSAGE_PATH_RECEIVER_SET_ENABLED, messageData)
     }
 }

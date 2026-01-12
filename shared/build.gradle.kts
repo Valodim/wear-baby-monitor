@@ -27,4 +27,5 @@ android {
 
 dependencies {
     api(files(rootProject.file("libs/opus.aar")))
+    implementation(libs.play.services.wearable)
 }

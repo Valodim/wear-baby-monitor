@@ -13,26 +13,26 @@ import androidx.core.app.NotificationCompat
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.Wearable
 import horse.amazin.babymonitor.shared.CHANNEL_PATH_SENDER_AUDIO
-import horse.amazin.babymonitor.shared.MESSAGE_PATH_SENDER_LOUDNESS
+import horse.amazin.babymonitor.shared.WearMessageInteractor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import java.nio.ByteBuffer
 
 class BabyMonitorSenderService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var audioStreamController: AudioStreamController
 
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
-    private val messageClient by lazy { Wearable.getMessageClient(applicationContext) }
+    private val messageInteractor = WearMessageInteractor(applicationContext)
     private val channelClient by lazy { Wearable.getChannelClient(applicationContext) }
-    private val nodeClient by lazy { Wearable.getNodeClient(applicationContext) }
 
     private var configNodeId: String? = null
     private var configThresholdDb: Float = -75.0f
@@ -83,7 +83,7 @@ class BabyMonitorSenderService : Service() {
         this.configThresholdDb = configThresholdDb
         this.configDurationMs = configDurationMs
 
-        audioStreamController = AudioStreamController(applicationContext, this::onLoudnessSample)
+        audioStreamController = AudioStreamController(applicationContext)
         audioStreamController.initialize()
 
         observeControllerState()
@@ -105,7 +105,8 @@ class BabyMonitorSenderService : Service() {
             return
         }
 
-        onLoudnessSample(0.0f)
+        val nodeId = configNodeId ?: return
+        messageInteractor.sendLoudnessMessage(nodeId, 0.0f)
 
         audioStreamController.close()
     }
@@ -114,6 +115,7 @@ class BabyMonitorSenderService : Service() {
     var aboveThresholdSince: Long? = null
     var pendingChange = false
 
+    @OptIn(FlowPreview::class)
     private fun observeControllerState() {
         serviceScope.launch {
             isStreaming.collect { isStreaming ->
@@ -123,6 +125,14 @@ class BabyMonitorSenderService : Service() {
         serviceScope.launch {
             audioStreamController.currentLoudness.collect { loudness ->
                 _currentLoudness.value = loudness
+            }
+        }
+        serviceScope.launch {
+            audioStreamController.currentLoudness.sample(2000).collect { loudnessDb ->
+                val nodeId = configNodeId ?: return@collect
+                if (loudnessDb != null) {
+                    messageInteractor.sendLoudnessMessage(nodeId, loudnessDb)
+                }
             }
         }
         serviceScope.launch(Dispatchers.Default) {
@@ -185,8 +195,8 @@ class BabyMonitorSenderService : Service() {
         pendingChange = true
         serviceScope.launch(Dispatchers.Main) {
             try {
-                val node = nodeClient.connectedNodes.await().firstOrNull() ?: return@launch
-                val channel = channelClient.openChannel(node.id, CHANNEL_PATH_SENDER_AUDIO).await()
+                val nodeId = configNodeId ?: return@launch
+                val channel = channelClient.openChannel(nodeId, CHANNEL_PATH_SENDER_AUDIO).await()
                 val outputStream = channelClient.getOutputStream(channel).await()
                 audioStreamController.startStreaming(outputStream)
                 streamingChannel = channel
@@ -206,16 +216,6 @@ class BabyMonitorSenderService : Service() {
         streamingChannel = null
         _isStreaming.value = false
         _streamStatus.value = "Monitoring"
-    }
-
-    private fun onLoudnessSample(db: Float) {
-        val nodeId = configNodeId ?: return
-
-        val messageData = ByteBuffer.allocate(4).apply {
-            putFloat(db)
-        }.array()
-
-        messageClient.sendMessage(nodeId, MESSAGE_PATH_SENDER_LOUDNESS, messageData)
     }
 
     private fun currentNotificationText(isStreaming: Boolean): String {
